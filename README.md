@@ -1,10 +1,18 @@
 # Freox — Live Forex Cockpit
 
+![Beta](https://img.shields.io/badge/status-BETA-ff8c00?style=for-the-badge)
+![Work in progress](https://img.shields.io/badge/work%20in%20progress-yes-ffb020?style=for-the-badge)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-00e28a.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab)
 ![Built with Streamlit](https://img.shields.io/badge/Built%20with-Streamlit-ff4b4b)
-![Status](https://img.shields.io/badge/status-work%20in%20progress-ffb020)
 ![GitHub stars](https://img.shields.io/github/stars/Spoofkapoof/freox?style=social)
+
+> ## 🚧 BETA — Work In Progress
+> **Freox is in active beta.** It's usable but unfinished — features change often,
+> things may break, and data can be delayed or wrong. **Not financial advice and not
+> for live trading decisions.** Try it, break it, and please open an issue with feedback.
+> See the full disclaimer at the bottom.
 
 An all-in-one live foreign-exchange cockpit — a single-screen **forex dashboard** with a
 **currency strength meter**, multi-timeframe **trend heatmap**, per-pair **volatility (ATR)**,
@@ -12,10 +20,6 @@ and a live **economic calendar**. Built with Python + Streamlit, **no API keys r
 Covers all major and minor FX pairs plus **gold (XAUUSD)** and **Bitcoin (BTC)**.
 
 ![Freox dashboard](assets/freox-screenshot.png)
-
-> **Status: work in progress.** Freox is under active development. Expect rough
-> edges and changing features. It is a monitoring/research tool, not trading
-> software — see the disclaimer below.
 
 ## Features
 
