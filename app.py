@@ -454,9 +454,17 @@ def cockpit():
     _STATIC = {"displayModeBar": False, "staticPlot": True, "scrollZoom": False}
 
     with left:
-        # sort controls live ON the monitor (visible, not in the hidden sidebar)
-        st.markdown('<div class="panel" style="margin-bottom:.3rem"><h4>Pair Monitor</h4></div>',
-                    unsafe_allow_html=True)
+        # title box — centered title + the Vol/D legend inside it
+        st.markdown(
+            f'<div class="panel" style="margin-bottom:.3rem">'
+            f'<h4 style="text-align:center">Pair Monitor</h4>'
+            f'<div style="color:{MUT};font:500 10px/1.4 monospace;text-align:center">'
+            f'Vol/D = avg daily range (ATR-14): pips · pt gold · $ btc · '
+            f'<span style="color:{DOWN}">■</span> wild '
+            f'<span style="color:{AMBER}">■</span> elevated '
+            f'<span style="color:{INK}">■</span> normal '
+            f'<span style="color:{MUT}">■</span> quiet</div></div>',
+            unsafe_allow_html=True)
         sc1, sc2 = st.columns([3, 2], gap="small")
         sort_by = sc1.selectbox("Sort by", ["Default", "Day %", "Vol"] + tfs,
                                 index=0, key="sort_by")
@@ -465,27 +473,20 @@ def cockpit():
         ordered = order_pairs(watch, quotes, trends, atrs, sort_by, sort_desc)
 
         st.markdown('<div class="panel">' +
-                    monitor_table(ordered, quotes, trends, atrs) +
-                    f'<div style="color:{MUT};font:500 10px/1.4 monospace;margin-top:.35rem">'
-                    f'Vol/D = avg daily range (ATR-14): pips · pt gold · $ btc · '
-                    f'<span style="color:{DOWN}">■</span> wild '
-                    f'<span style="color:{AMBER}">■</span> elevated '
-                    f'<span style="color:{INK}">■</span> normal '
-                    f'<span style="color:{MUT}">■</span> quiet</div></div>',
+                    monitor_table(ordered, quotes, trends, atrs) + '</div>',
                     unsafe_allow_html=True)
 
     with mid:
-        st.markdown('<div class="panel"><h4>Trend Heatmap · pair × TF</h4></div>',
-                    unsafe_allow_html=True)
-        st.plotly_chart(heatmap_fig(ordered, trends), width="stretch", config=_STATIC)
         strong, weak = strength.index[0], strength.index[-1]
         st.markdown(
-            f'<div class="panel" style="color:{INK};font:600 12px/1.5 monospace">'
+            f'<div class="panel"><h4 style="text-align:center">Trend Heatmap · pair × TF</h4>'
+            f'<div style="color:{INK};font:600 12px/1.5 monospace;text-align:center">'
             f'▸ Cleanest bias: <span style="color:{UP}">LONG {strong}</span> / '
             f'<span style="color:{DOWN}">SHORT {weak}</span><br>'
             f'<span style="color:{MUT}">strongest vs weakest currency — '
-            f'look for the pair that is {strong}{weak} or {weak}{strong}</span></div>',
+            f'look for the pair that is {strong}{weak} or {weak}{strong}</span></div></div>',
             unsafe_allow_html=True)
+        st.plotly_chart(heatmap_fig(ordered, trends), width="stretch", config=_STATIC)
 
     with right:
         st.markdown('<div class="panel"><h4>📰 Economic Calendar</h4>' +
