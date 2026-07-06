@@ -142,6 +142,12 @@ st.markdown(f"""<style>
   .feed::-webkit-scrollbar{{width:7px;}} .feed::-webkit-scrollbar-track{{background:{PANEL};}}
   .feed::-webkit-scrollbar-thumb{{background:{BORDER};border-radius:4px;}}
 
+  /* watchlist popover trigger — match the terminal look */
+  [data-testid="stPopover"] button{{background:{PANEL}!important;border:1px solid {BORDER}!important;
+    color:{INK}!important;font:700 12px/1 'JetBrains Mono',monospace!important;
+    letter-spacing:.1em;}}
+  [data-testid="stPopover"] button:hover{{border-color:{UP}!important;color:{UP}!important;}}
+
   /* ── stop the auto-refresh dim/flicker ── */
   [data-stale="true"]{{opacity:1!important;transition:none!important;filter:none!important;}}
   .element-container,.stPlotlyChart{{transition:none!important;}}
@@ -166,19 +172,24 @@ ARROW_COL = {"▲▲": UP, "▲": UP_DIM, "▼": DOWN_DIM, "▼▼": DOWN, "·":
 # ---------------------------------------------------------------------------
 with st.sidebar:
     st.markdown("### CONTROLS")
-    watch = st.multiselect("Watchlist", ALL_SYMBOLS, default=DEFAULT_WATCH)
-    tfs = st.multiselect("Timeframes", TF_ALL, default=TF_ALL)
+    st.caption("Pairs are chosen from the **Watchlist** button up top.")
+    tfs = st.multiselect("Timeframes", TF_ALL, default=TF_ALL, key="tfs_sel")
     tfs = [t for t in TF_ALL if t in tfs] or TF_ALL
-    watch = watch or DEFAULT_WATCH
 
-    strength_period = st.selectbox("Strength window", ["24H", "1D", "1W"], index=0)
-    refresh_lbl = st.selectbox("Auto-refresh", ["Off", "15s", "30s", "60s"], index=2)
+    strength_period = st.selectbox("Strength window", ["24H", "1D", "1W"],
+                                   index=0, key="strength_period")
+    refresh_lbl = st.selectbox("Auto-refresh", ["Off", "15s", "30s", "60s"],
+                               index=2, key="refresh_lbl")
     news_impacts = st.multiselect("News impact", ["High", "Medium", "Low", "Holiday"],
-                                  default=["High", "Medium"])
+                                  default=["High", "Medium"], key="news_impacts")
     if st.button("Force refresh", width="stretch"):
         st.cache_data.clear(); st.rerun()
 
 _REFRESH = {"Off": None, "15s": 15, "30s": 30, "60s": 60}[refresh_lbl]
+
+# Persist watchlist checkbox state once; survives every auto-refresh rerun.
+for _p in ALL_SYMBOLS:
+    st.session_state.setdefault(f"w_{_p}", _p in DEFAULT_WATCH)
 
 
 def _fmt_price(p):
@@ -216,6 +227,35 @@ def _vol_fmt(pair, vol):
     if pair == "XAUUSD":
         return f"{a:.0f}pt"
     return f'{vol["pips"]:.0f}p'
+
+
+def watchlist_picker():
+    """Grouped checkboxes to add/remove instruments. Returns the selected list
+    (in ALL_SYMBOLS order). State lives in session_state, so it survives refreshes."""
+    st.markdown("**Select instruments to monitor**")
+    qa = st.columns(3)
+    if qa[0].button("Select all", key="wl_all", width="stretch"):
+        for p in ALL_SYMBOLS:
+            st.session_state[f"w_{p}"] = True
+        st.rerun()
+    if qa[1].button("Majors + XAU/BTC", key="wl_maj", width="stretch"):
+        for p in ALL_SYMBOLS:
+            st.session_state[f"w_{p}"] = p in MAJOR_PAIRS + EXTRA
+        st.rerun()
+    if qa[2].button("Clear", key="wl_clr", width="stretch"):
+        for p in ALL_SYMBOLS:
+            st.session_state[f"w_{p}"] = False
+        st.rerun()
+
+    groups = [("Majors", MAJOR_PAIRS), ("Minors", MINOR_PAIRS[:11]),
+              ("Minors", MINOR_PAIRS[11:]), ("Metal / Crypto", EXTRA)]
+    cols = st.columns(4)
+    for col, (name, plist) in zip(cols, groups):
+        with col:
+            st.caption(name)
+            for p in plist:
+                st.checkbox(p, key=f"w_{p}")
+    return [p for p in ALL_SYMBOLS if st.session_state.get(f"w_{p}")]
 
 
 def order_pairs(pairs, quotes, trends, atrs, sort_by, desc):
@@ -341,10 +381,10 @@ def heatmap_fig(pairs, trends):
     return fig
 
 
-def kpi_strip(strength, trends, cal, now):
+def kpi_strip(pairs, strength, trends, cal, now):
     strong, weak = strength.index[0], strength.index[-1]
     # breadth: share of (pair,tf) cells trending up
-    cells = [trends[p][t]["score"] for p in watch for t in tfs]
+    cells = [trends[p][t]["score"] for p in pairs for t in tfs]
     up = sum(1 for c in cells if c > 0)
     breadth = f"{up}/{len(cells)}"
     bcol = UP if up * 2 >= len(cells) else DOWN
@@ -376,6 +416,28 @@ def kpi_strip(strength, trends, cal, now):
 @st.fragment(run_every=_REFRESH)
 def cockpit():
     now = d.now_utc()
+    rlabel = "auto-refresh off" if _REFRESH is None else f"every {refresh_lbl}"
+
+    # top bar: logo/live | Watchlist popover | LAST UPDATED time
+    hL, hMid, hR = st.columns([5, 2, 5], gap="small", vertical_alignment="center")
+    with hL:
+        st.markdown(
+            f'<div class="hdr"><span class="logo">FRE<b>O</b>X</span>'
+            f'<span class="live"><span class="dot"></span>{rlabel.upper()}</span></div>',
+            unsafe_allow_html=True)
+    with hMid:
+        with st.popover("☰ Watchlist", width="stretch"):
+            watch = watchlist_picker()
+    with hR:
+        st.markdown(
+            f'<div class="clock" style="text-align:right;padding-top:.4rem">'
+            f'LAST UPDATED&nbsp; {now:%Y-%m-%d %H:%M:%S} UTC</div>',
+            unsafe_allow_html=True)
+
+    if not watch:
+        st.warning("No instruments selected — open **☰ Watchlist** and pick some.")
+        return
+
     data = gather_pairs(tuple(watch), tuple(tfs))
     quotes = {p: data[p]["quote"] for p in watch}
     trends = {p: data[p]["trend"] for p in watch}
@@ -383,16 +445,8 @@ def cockpit():
     strength = c_strength(strength_period)
     cal = c_calendar()
 
-    # header — the timestamp is the LAST UPDATE (refresh) time, not a wall clock
-    rlabel = "auto-refresh off" if _REFRESH is None else f"every {refresh_lbl}"
-    st.markdown(
-        f'<div class="hdr"><span class="logo">FRE<b>O</b>X</span>'
-        f'<span class="live"><span class="dot"></span>{rlabel.upper()}</span>'
-        f'<span class="clock">LAST UPDATED&nbsp; {now:%Y-%m-%d %H:%M:%S} UTC</span>'
-        f'</div>', unsafe_allow_html=True)
-
     # KPI strip
-    st.markdown(kpi_strip(strength, trends, cal, now), unsafe_allow_html=True)
+    st.markdown(kpi_strip(watch, strength, trends, cal, now), unsafe_allow_html=True)
 
     # main grid: [monitor+strength] | [heatmap] | [news]
     left, mid, right = st.columns([5, 4, 3], gap="small")
@@ -404,9 +458,10 @@ def cockpit():
         st.markdown('<div class="panel" style="margin-bottom:.3rem"><h4>Pair Monitor</h4></div>',
                     unsafe_allow_html=True)
         sc1, sc2 = st.columns([3, 2], gap="small")
-        sort_by = sc1.selectbox("Sort by", ["Default", "Day %", "Vol"] + tfs, index=0)
+        sort_by = sc1.selectbox("Sort by", ["Default", "Day %", "Vol"] + tfs,
+                                index=0, key="sort_by")
         sort_desc = sc2.radio("Order", ["High→Low", "Low→High"], index=0,
-                              horizontal=True) == "High→Low"
+                              horizontal=True, key="sort_order") == "High→Low"
         ordered = order_pairs(watch, quotes, trends, atrs, sort_by, sort_desc)
 
         st.markdown('<div class="panel">' +
@@ -418,9 +473,6 @@ def cockpit():
                     f'<span style="color:{INK}">■</span> normal '
                     f'<span style="color:{MUT}">■</span> quiet</div></div>',
                     unsafe_allow_html=True)
-        st.markdown(f'<div class="panel"><h4>Currency Strength · {strength_period}</h4></div>',
-                    unsafe_allow_html=True)
-        st.plotly_chart(strength_fig(strength), width="stretch", config=_STATIC)
 
     with mid:
         st.markdown('<div class="panel"><h4>Trend Heatmap · pair × TF</h4></div>',
@@ -438,6 +490,9 @@ def cockpit():
     with right:
         st.markdown('<div class="panel"><h4>📰 Economic Calendar</h4>' +
                     news_feed(cal, now) + '</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="panel"><h4>Currency Strength · {strength_period}</h4></div>',
+                    unsafe_allow_html=True)
+        st.plotly_chart(strength_fig(strength), width="stretch", config=_STATIC)
 
     # data-source disclaimer (accuracy honesty)
     st.markdown(
