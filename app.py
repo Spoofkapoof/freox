@@ -374,9 +374,9 @@ def heatmap_fig(pairs, trends):
     fig.update_layout(
         height=max(250, 34 * len(pairs) + 40), template="plotly_dark", dragmode=False,
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        margin=dict(l=6, r=6, t=6, b=6),
+        margin=dict(l=6, r=6, t=22, b=6),
         yaxis=dict(autorange="reversed", fixedrange=True),
-        xaxis=dict(fixedrange=True),
+        xaxis=dict(fixedrange=True, side="top"),
         font=dict(family="JetBrains Mono", color=MUT, size=11))
     return fig
 
