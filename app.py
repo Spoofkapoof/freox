@@ -74,6 +74,8 @@ AMBER   = "#ffb020"
 INK     = "#d7dde8"
 MUT     = "#6b7688"
 
+VERSION = "0.1"   # beta — bump on each release
+
 st.set_page_config(page_title="FREOX ▮ FX Cockpit", page_icon="💹",
                    layout="wide", initial_sidebar_state="collapsed")
 
@@ -98,6 +100,8 @@ st.markdown(f"""<style>
   .logo b{{color:{UP};}}
   .live{{display:inline-flex;align-items:center;gap:.4rem;color:{UP};
          font:700 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;}}
+  .beta{{color:#ff8c00;border:1px solid #ff8c00;border-radius:4px;padding:.12rem .35rem;
+         font:700 9px/1 'JetBrains Mono',monospace;letter-spacing:.12em;}}
   .dot{{width:8px;height:8px;border-radius:50%;background:{UP};
         box-shadow:0 0 8px {UP};animation:pulse 1.6s infinite;}}
   @keyframes pulse{{0%,100%{{opacity:1;}}50%{{opacity:.35;}}}}
@@ -469,6 +473,7 @@ def cockpit():
     with hL:
         st.markdown(
             f'<div class="hdr"><span class="logo">FRE<b>O</b>X</span>'
+            f'<span class="beta">v{VERSION} BETA</span>'
             f'<span class="live"><span class="dot"></span>{rlabel.upper()}</span></div>',
             unsafe_allow_html=True)
     with hMid:
