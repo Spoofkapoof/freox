@@ -25,19 +25,29 @@ import indicators as ind
 # ---------------------------------------------------------------------------
 # Cached data wrappers
 # ---------------------------------------------------------------------------
-@st.cache_data(ttl=30, show_spinner=False)
-def c_quote(pair):
-    return d.get_quote(pair)
+import concurrent.futures as _cf
 
 
-@st.cache_data(ttl=60, show_spinner=False)
-def c_tf_trend(pair, tfs):
-    return ind.multi_tf_trend(pair, tfs)
+@st.cache_data(ttl=45, show_spinner=False)
+def gather_pairs(watch, tfs):
+    """Fetch quote + multi-TF trend + ATR for every pair IN PARALLEL.
 
+    One cache entry for the whole watchlist, so 30+ pairs load in a few
+    seconds instead of tens. Threads call the plain (non-Streamlit) data
+    functions, which is thread-safe.
+    """
+    def one(p):
+        return p, {
+            "quote": d.get_quote(p),
+            "trend": ind.multi_tf_trend(p, tfs),
+            "atr": ind.atr_volatility(p, "D1"),
+        }
 
-@st.cache_data(ttl=300, show_spinner=False)
-def c_atr(pair):
-    return ind.atr_volatility(pair, "D1")
+    out = {}
+    with _cf.ThreadPoolExecutor(max_workers=12) as ex:
+        for p, data in ex.map(one, watch):
+            out[p] = data
+    return out
 
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -141,11 +151,13 @@ st.markdown(f"""<style>
 </style>""", unsafe_allow_html=True)
 
 TF_ALL = ["M15", "H1", "H4", "D1"]
-# 7 majors, with gold + BTC pinned to the bottom.
 EXTRA = ["XAUUSD", "BTCUSD"]
 MAJOR_PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "USDCAD", "AUDUSD", "NZDUSD"]
+# Minor pairs = the major crosses (no USD leg).
+MINOR_PAIRS = [p for p in d.PAIRS_28 if p not in MAJOR_PAIRS]
 ALL_SYMBOLS = d.PAIRS_28 + EXTRA
-DEFAULT_WATCH = MAJOR_PAIRS + EXTRA
+# Default: majors, then minors, then gold + BTC pinned to the bottom.
+DEFAULT_WATCH = MAJOR_PAIRS + MINOR_PAIRS + EXTRA
 IMPACT_DOT = {"High": DOWN, "Medium": AMBER, "Low": "#4a90d9", "Holiday": MUT}
 ARROW_COL = {"▲▲": UP, "▲": UP_DIM, "▼": DOWN_DIM, "▼▼": DOWN, "·": MUT}
 
@@ -158,13 +170,6 @@ with st.sidebar:
     tfs = st.multiselect("Timeframes", TF_ALL, default=TF_ALL)
     tfs = [t for t in TF_ALL if t in tfs] or TF_ALL
     watch = watch or DEFAULT_WATCH
-
-    st.markdown("**Sort monitor**")
-    sc1, sc2 = st.columns([3, 2])
-    sort_by = sc1.selectbox("by", ["Default", "Day %", "Vol"] + tfs,
-                            index=0, label_visibility="collapsed")
-    sort_desc = sc2.radio("order", ["↓", "↑"], index=0, horizontal=True,
-                          label_visibility="collapsed") == "↓"
 
     strength_period = st.selectbox("Strength window", ["24H", "1D", "1W"], index=0)
     refresh_lbl = st.selectbox("Auto-refresh", ["Off", "15s", "30s", "60s"], index=2)
@@ -213,8 +218,8 @@ def _vol_fmt(pair, vol):
     return f'{vol["pips"]:.0f}p'
 
 
-def order_pairs(pairs, quotes, trends, atrs):
-    """Return `pairs` sorted per the sidebar sort control (None sinks to bottom)."""
+def order_pairs(pairs, quotes, trends, atrs, sort_by, desc):
+    """Return `pairs` sorted per the monitor sort control (None sinks to bottom)."""
     if sort_by == "Default":
         return pairs
 
@@ -227,7 +232,7 @@ def order_pairs(pairs, quotes, trends, atrs):
             v = trends[p].get(sort_by, {}).get("score")
         return float("-inf") if v is None else v
 
-    return sorted(pairs, key=metric, reverse=sort_desc)
+    return sorted(pairs, key=metric, reverse=desc)
 
 
 def monitor_table(pairs, quotes, trends, atrs):
@@ -308,11 +313,12 @@ def strength_fig(s):
         text=[f"{v:+.2f}" for v in s.values], textposition="outside",
         textfont=dict(family="JetBrains Mono", size=11, color=INK)))
     fig.update_layout(
-        height=250, template="plotly_dark",
+        height=250, template="plotly_dark", dragmode=False,
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        margin=dict(l=6, r=30, t=6, b=6), yaxis=dict(autorange="reversed"),
+        margin=dict(l=6, r=30, t=6, b=6),
+        yaxis=dict(autorange="reversed", fixedrange=True),
         font=dict(family="JetBrains Mono", color=MUT, size=11),
-        xaxis=dict(gridcolor=BORDER, zerolinecolor=MUT))
+        xaxis=dict(gridcolor=BORDER, zerolinecolor=MUT, fixedrange=True))
     return fig
 
 
@@ -326,9 +332,11 @@ def heatmap_fig(pairs, trends):
         colorscale=[[0, DOWN], [0.25, DOWN_DIM], [0.5, "#202632"],
                     [0.75, UP_DIM], [1, UP]]))
     fig.update_layout(
-        height=max(250, 34 * len(pairs) + 40), template="plotly_dark",
+        height=max(250, 34 * len(pairs) + 40), template="plotly_dark", dragmode=False,
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        margin=dict(l=6, r=6, t=6, b=6), yaxis=dict(autorange="reversed"),
+        margin=dict(l=6, r=6, t=6, b=6),
+        yaxis=dict(autorange="reversed", fixedrange=True),
+        xaxis=dict(fixedrange=True),
         font=dict(family="JetBrains Mono", color=MUT, size=11))
     return fig
 
@@ -368,12 +376,12 @@ def kpi_strip(strength, trends, cal, now):
 @st.fragment(run_every=_REFRESH)
 def cockpit():
     now = d.now_utc()
-    quotes = {p: c_quote(p) for p in watch}
-    trends = {p: c_tf_trend(p, tuple(tfs)) for p in watch}
-    atrs = {p: c_atr(p) for p in watch}
+    data = gather_pairs(tuple(watch), tuple(tfs))
+    quotes = {p: data[p]["quote"] for p in watch}
+    trends = {p: data[p]["trend"] for p in watch}
+    atrs = {p: data[p]["atr"] for p in watch}
     strength = c_strength(strength_period)
     cal = c_calendar()
-    ordered = order_pairs(watch, quotes, trends, atrs)
 
     # header — the timestamp is the LAST UPDATE (refresh) time, not a wall clock
     rlabel = "auto-refresh off" if _REFRESH is None else f"every {refresh_lbl}"
@@ -389,11 +397,22 @@ def cockpit():
     # main grid: [monitor+strength] | [heatmap] | [news]
     left, mid, right = st.columns([5, 4, 3], gap="small")
 
+    _STATIC = {"displayModeBar": False, "staticPlot": True, "scrollZoom": False}
+
     with left:
-        st.markdown('<div class="panel"><h4>Pair Monitor</h4>' +
+        # sort controls live ON the monitor (visible, not in the hidden sidebar)
+        st.markdown('<div class="panel" style="margin-bottom:.3rem"><h4>Pair Monitor</h4></div>',
+                    unsafe_allow_html=True)
+        sc1, sc2 = st.columns([3, 2], gap="small")
+        sort_by = sc1.selectbox("Sort by", ["Default", "Day %", "Vol"] + tfs, index=0)
+        sort_desc = sc2.radio("Order", ["High→Low", "Low→High"], index=0,
+                              horizontal=True) == "High→Low"
+        ordered = order_pairs(watch, quotes, trends, atrs, sort_by, sort_desc)
+
+        st.markdown('<div class="panel">' +
                     monitor_table(ordered, quotes, trends, atrs) +
                     f'<div style="color:{MUT};font:500 10px/1.4 monospace;margin-top:.35rem">'
-                    f'Vol/D = avg daily range in pips (ATR-14) · '
+                    f'Vol/D = avg daily range (ATR-14): pips · pt gold · $ btc · '
                     f'<span style="color:{DOWN}">■</span> wild '
                     f'<span style="color:{AMBER}">■</span> elevated '
                     f'<span style="color:{INK}">■</span> normal '
@@ -401,14 +420,12 @@ def cockpit():
                     unsafe_allow_html=True)
         st.markdown(f'<div class="panel"><h4>Currency Strength · {strength_period}</h4></div>',
                     unsafe_allow_html=True)
-        st.plotly_chart(strength_fig(strength), width="stretch",
-                        config={"displayModeBar": False})
+        st.plotly_chart(strength_fig(strength), width="stretch", config=_STATIC)
 
     with mid:
         st.markdown('<div class="panel"><h4>Trend Heatmap · pair × TF</h4></div>',
                     unsafe_allow_html=True)
-        st.plotly_chart(heatmap_fig(ordered, trends), width="stretch",
-                        config={"displayModeBar": False})
+        st.plotly_chart(heatmap_fig(ordered, trends), width="stretch", config=_STATIC)
         strong, weak = strength.index[0], strength.index[-1]
         st.markdown(
             f'<div class="panel" style="color:{INK};font:600 12px/1.5 monospace">'

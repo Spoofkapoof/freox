@@ -4,6 +4,8 @@ An all-in-one live foreign-exchange cockpit. A single-screen dashboard that show
 currency strength, per-pair trend across multiple timeframes, per-pair volatility,
 and this week's economic calendar — with no API keys required.
 
+![Freox dashboard](assets/freox-screenshot.png)
+
 > **Status: work in progress.** Freox is under active development. Expect rough
 > edges and changing features. It is a monitoring/research tool, not trading
 > software — see the disclaimer below.
