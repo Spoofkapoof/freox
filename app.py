@@ -386,8 +386,16 @@ def heatmap_fig(pairs, trends):
     return fig
 
 
-def kpi_strip(pairs, strength, trends, cal, now):
+def kpi_strip(pairs, quotes, strength, trends, cal, now):
     strong, weak = strength.index[0], strength.index[-1]
+    # biggest daily mover among the watched pairs
+    movers = [(p, quotes[p]["change_pct"]) for p in pairs
+              if quotes[p].get("change_pct") is not None]
+    if movers:
+        mp, mc = max(movers, key=lambda x: abs(x[1]))
+        m_pair, m_sub, m_col = mp, f"{mc:+.2f}%", (UP if mc >= 0 else DOWN)
+    else:
+        m_pair, m_sub, m_col = "—", "", MUT
     # breadth: share of (pair,tf) cells trending up
     cells = [trends[p][t]["score"] for p in pairs for t in tfs]
     up = sum(1 for c in cells if c > 0)
@@ -406,13 +414,18 @@ def kpi_strip(pairs, strength, trends, cal, now):
                 f'<div class="val" style="color:{col}">{_esc(val)}</div>'
                 f'<div class="sub">{_esc(sub)}</div></div>')
 
-    # strongest + weakest share one box (two stats side by side)
+    # strongest | top mover | weakest — labels aligned over their values
     combined = (
-        f'<div class="kpi"><div class="lab">Strongest · Weakest</div>'
-        f'<div style="display:flex;justify-content:space-between;gap:.5rem;margin-top:.1rem">'
-        f'<div><div class="val" style="color:{UP};font-size:21px">{strong}</div>'
+        f'<div class="kpi">'
+        f'<div class="lab" style="display:flex;justify-content:space-between">'
+        f'<span>Strongest</span><span>Top Mover</span><span>Weakest</span></div>'
+        f'<div style="display:flex;justify-content:space-between;align-items:baseline;'
+        f'gap:.4rem;margin-top:.1rem">'
+        f'<div><div class="val" style="color:{UP};font-size:20px">{strong}</div>'
         f'<div class="sub" style="color:{UP}">{strength.iloc[0]:+.2f}</div></div>'
-        f'<div style="text-align:right"><div class="val" style="color:{DOWN};font-size:21px">{weak}</div>'
+        f'<div style="text-align:center"><div class="val" style="color:{m_col};font-size:16px">{_esc(m_pair)}</div>'
+        f'<div class="sub" style="color:{m_col}">{m_sub}</div></div>'
+        f'<div style="text-align:right"><div class="val" style="color:{DOWN};font-size:20px">{weak}</div>'
         f'<div class="sub" style="color:{DOWN}">{strength.iloc[-1]:+.2f}</div></div>'
         f'</div></div>')
 
@@ -459,7 +472,7 @@ def cockpit():
     cal = c_calendar()
 
     # KPI strip
-    st.markdown(kpi_strip(watch, strength, trends, cal, now), unsafe_allow_html=True)
+    st.markdown(kpi_strip(watch, quotes, strength, trends, cal, now), unsafe_allow_html=True)
 
     # main grid: [monitor+strength] | [heatmap] | [news]
     left, mid, right = st.columns([5, 4, 3], gap="small")
