@@ -235,24 +235,32 @@ def _vol_fmt(pair, vol):
 
 
 def _wl_set_only(group):
-    """Select ONLY the pairs in `group`, deselect everything else."""
+    """Set exactly `group` on, everything else off (used by Select all / Clear)."""
     for p in ALL_SYMBOLS:
         st.session_state[f"w_{p}"] = p in group
+
+
+def _wl_toggle(group):
+    """Toggle a group: if all are already on, turn them all off; otherwise turn
+    them all on. Leaves other groups untouched."""
+    all_on = all(st.session_state.get(f"w_{p}") for p in group)
+    for p in group:
+        st.session_state[f"w_{p}"] = not all_on
 
 
 def watchlist_picker():
     """Grouped checkboxes to add/remove instruments. Returns the selected list
     (in ALL_SYMBOLS order). State lives in session_state, so it survives refreshes."""
     st.markdown("**Select instruments to monitor**")
-    # per-tab filter buttons (each selects ONLY that group). Metal/Crypto is
-    # just 2 items, so no button for it — tick them directly.
+    # per-tab toggle buttons: tick/untick a whole group without touching others.
+    # Metal/Crypto is just 2 items, so no button for it — tick them directly.
     qa = st.columns(3)
-    if qa[0].button("Only Majors", key="wl_maj", width="stretch"):
-        _wl_set_only(MAJOR_PAIRS); st.rerun()
-    if qa[1].button("Only Minors 1", key="wl_min1", width="stretch"):
-        _wl_set_only(MINORS_1); st.rerun()
-    if qa[2].button("Only Minors 2", key="wl_min2", width="stretch"):
-        _wl_set_only(MINORS_2); st.rerun()
+    if qa[0].button("Majors", key="wl_maj", width="stretch"):
+        _wl_toggle(MAJOR_PAIRS); st.rerun()
+    if qa[1].button("Minors 1", key="wl_min1", width="stretch"):
+        _wl_toggle(MINORS_1); st.rerun()
+    if qa[2].button("Minors 2", key="wl_min2", width="stretch"):
+        _wl_toggle(MINORS_2); st.rerun()
     qb = st.columns(2)
     if qb[0].button("Select all", key="wl_all", width="stretch"):
         _wl_set_only(ALL_SYMBOLS); st.rerun()
