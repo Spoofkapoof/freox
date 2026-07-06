@@ -159,11 +159,16 @@ st.markdown(f"""<style>
 TF_ALL = ["M15", "H1", "H4", "D1"]
 EXTRA = ["XAUUSD", "BTCUSD"]
 MAJOR_PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "USDCAD", "AUDUSD", "NZDUSD"]
-# Minor pairs = the major crosses (no USD leg).
-MINOR_PAIRS = [p for p in d.PAIRS_28 if p not in MAJOR_PAIRS]
-ALL_SYMBOLS = d.PAIRS_28 + EXTRA
-# Default watchlist = the 7 majors + gold + BTC (minors are opt-in via the picker).
-DEFAULT_WATCH = MAJOR_PAIRS + EXTRA
+# Minor crosses split by liquidity/popularity:
+# Minors 1 = the most-traded crosses; Minors 2 = the thinner, less-popular ones.
+MINORS_1 = ["EURJPY", "GBPJPY", "EURGBP", "EURCHF", "AUDJPY", "EURAUD",
+            "GBPCHF", "CADJPY", "NZDJPY", "EURCAD", "GBPAUD", "CHFJPY"]
+MINORS_2 = ["EURNZD", "GBPCAD", "GBPNZD", "AUDCHF", "AUDCAD", "AUDNZD",
+            "NZDCHF", "NZDCAD", "CADCHF"]
+MINOR_PAIRS = MINORS_1 + MINORS_2
+ALL_SYMBOLS = MAJOR_PAIRS + MINOR_PAIRS + EXTRA
+# Default watchlist = the 7 majors only (everything else is opt-in via the picker).
+DEFAULT_WATCH = MAJOR_PAIRS
 IMPACT_DOT = {"High": DOWN, "Medium": AMBER, "Low": "#4a90d9", "Holiday": MUT}
 ARROW_COL = {"▲▲": UP, "▲": UP_DIM, "▼": DOWN_DIM, "▼▼": DOWN, "·": MUT}
 
@@ -229,26 +234,33 @@ def _vol_fmt(pair, vol):
     return f'{vol["pips"]:.0f}p'
 
 
+def _wl_set_only(group):
+    """Select ONLY the pairs in `group`, deselect everything else."""
+    for p in ALL_SYMBOLS:
+        st.session_state[f"w_{p}"] = p in group
+
+
 def watchlist_picker():
     """Grouped checkboxes to add/remove instruments. Returns the selected list
     (in ALL_SYMBOLS order). State lives in session_state, so it survives refreshes."""
     st.markdown("**Select instruments to monitor**")
+    # per-tab filter buttons (each selects ONLY that group). Metal/Crypto is
+    # just 2 items, so no button for it — tick them directly.
     qa = st.columns(3)
-    if qa[0].button("Select all", key="wl_all", width="stretch"):
-        for p in ALL_SYMBOLS:
-            st.session_state[f"w_{p}"] = True
-        st.rerun()
-    if qa[1].button("Majors + XAU/BTC", key="wl_maj", width="stretch"):
-        for p in ALL_SYMBOLS:
-            st.session_state[f"w_{p}"] = p in MAJOR_PAIRS + EXTRA
-        st.rerun()
-    if qa[2].button("Clear", key="wl_clr", width="stretch"):
-        for p in ALL_SYMBOLS:
-            st.session_state[f"w_{p}"] = False
-        st.rerun()
+    if qa[0].button("Only Majors", key="wl_maj", width="stretch"):
+        _wl_set_only(MAJOR_PAIRS); st.rerun()
+    if qa[1].button("Only Minors 1", key="wl_min1", width="stretch"):
+        _wl_set_only(MINORS_1); st.rerun()
+    if qa[2].button("Only Minors 2", key="wl_min2", width="stretch"):
+        _wl_set_only(MINORS_2); st.rerun()
+    qb = st.columns(2)
+    if qb[0].button("Select all", key="wl_all", width="stretch"):
+        _wl_set_only(ALL_SYMBOLS); st.rerun()
+    if qb[1].button("Clear", key="wl_clr", width="stretch"):
+        _wl_set_only([]); st.rerun()
 
-    groups = [("Majors", MAJOR_PAIRS), ("Minors", MINOR_PAIRS[:11]),
-              ("Minors", MINOR_PAIRS[11:]), ("Metal / Crypto", EXTRA)]
+    groups = [("Majors", MAJOR_PAIRS), ("Minors 1", MINORS_1),
+              ("Minors 2", MINORS_2), ("Metal / Crypto", EXTRA)]
     cols = st.columns(4)
     for col, (name, plist) in zip(cols, groups):
         with col:
