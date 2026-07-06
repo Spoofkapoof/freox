@@ -1,8 +1,15 @@
-# Freox
+# Freox — Live Forex Cockpit
 
-An all-in-one live foreign-exchange cockpit. A single-screen dashboard that shows
-currency strength, per-pair trend across multiple timeframes, per-pair volatility,
-and this week's economic calendar — with no API keys required.
+[![License: MIT](https://img.shields.io/badge/License-MIT-00e28a.svg)](LICENSE)
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab)
+![Built with Streamlit](https://img.shields.io/badge/Built%20with-Streamlit-ff4b4b)
+![Status](https://img.shields.io/badge/status-work%20in%20progress-ffb020)
+![GitHub stars](https://img.shields.io/github/stars/Spoofkapoof/freox?style=social)
+
+An all-in-one live foreign-exchange cockpit — a single-screen **forex dashboard** with a
+**currency strength meter**, multi-timeframe **trend heatmap**, per-pair **volatility (ATR)**,
+and a live **economic calendar**. Built with Python + Streamlit, **no API keys required**.
+Covers all major and minor FX pairs plus **gold (XAUUSD)** and **Bitcoin (BTC)**.
 
 ![Freox dashboard](assets/freox-screenshot.png)
 
@@ -74,3 +81,9 @@ requirements.txt
 Freox is for monitoring and research only. Prices are indicative mid quotes from a
 free source, are not real-time broker quotes, and must not be used for trade
 execution. Nothing here is financial advice.
+
+---
+
+<sub>**Keywords:** forex dashboard · currency strength meter · FX trend heatmap · multi-timeframe
+analysis · ATR volatility · economic calendar · Forex Factory · Yahoo Finance · Streamlit trading
+dashboard · Python forex tool · XAUUSD gold · Bitcoin BTC · real-time market data · fintech.</sub>
