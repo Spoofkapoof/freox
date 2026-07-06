@@ -348,17 +348,22 @@ def _countdown(t, now):
 
 def strength_fig(s):
     colors = [UP if v >= 0 else DOWN for v in s.values]
+    # headroom so the "outside" value labels never clip at the box edge
+    m = max(abs(float(s.min())), abs(float(s.max())), 0.1)
+    pad = m * 0.6 + 0.05
     fig = go.Figure(go.Bar(
         x=s.values, y=s.index, orientation="h", marker_color=colors,
         text=[f"{v:+.2f}" for v in s.values], textposition="outside",
-        textfont=dict(family="JetBrains Mono", size=11, color=INK)))
+        textfont=dict(family="JetBrains Mono", size=11, color=INK),
+        cliponaxis=False))
     fig.update_layout(
         height=250, template="plotly_dark", dragmode=False,
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        margin=dict(l=6, r=30, t=6, b=6),
+        margin=dict(l=6, r=12, t=6, b=6),
         yaxis=dict(autorange="reversed", fixedrange=True),
         font=dict(family="JetBrains Mono", color=MUT, size=11),
-        xaxis=dict(gridcolor=BORDER, zerolinecolor=MUT, fixedrange=True))
+        xaxis=dict(gridcolor=BORDER, zerolinecolor=MUT, fixedrange=True,
+                   range=[-(m + pad), m + pad]))
     return fig
 
 
