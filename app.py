@@ -401,18 +401,26 @@ def kpi_strip(pairs, strength, trends, cal, now):
         nh_sub = _esc(nh["title"])[:26]
     else:
         nh_val, nh_sub = "—", "no high-impact ahead"
-    tiles = [
-        ("Strongest", strong, f'{strength.iloc[0]:+.2f}', UP),
-        ("Weakest", weak, f'{strength.iloc[-1]:+.2f}', DOWN),
-        ("Trend breadth", breadth, "cells up", bcol),
-        ("Next high-impact", nh_val, nh_sub, AMBER),
-    ]
-    html = '<div class="kpis">'
-    for lab, val, sub, col in tiles:
-        html += (f'<div class="kpi"><div class="lab">{lab}</div>'
-                 f'<div class="val" style="color:{col}">{_esc(val)}</div>'
-                 f'<div class="sub">{_esc(sub)}</div></div>')
-    return html + "</div>"
+    def tile(lab, val, sub, col):
+        return (f'<div class="kpi"><div class="lab">{lab}</div>'
+                f'<div class="val" style="color:{col}">{_esc(val)}</div>'
+                f'<div class="sub">{_esc(sub)}</div></div>')
+
+    # strongest + weakest share one box (two stats side by side)
+    combined = (
+        f'<div class="kpi"><div class="lab">Strongest · Weakest</div>'
+        f'<div style="display:flex;justify-content:space-between;gap:.5rem;margin-top:.1rem">'
+        f'<div><div class="val" style="color:{UP};font-size:21px">{strong}</div>'
+        f'<div class="sub" style="color:{UP}">{strength.iloc[0]:+.2f}</div></div>'
+        f'<div style="text-align:right"><div class="val" style="color:{DOWN};font-size:21px">{weak}</div>'
+        f'<div class="sub" style="color:{DOWN}">{strength.iloc[-1]:+.2f}</div></div>'
+        f'</div></div>')
+
+    return ('<div class="kpis" style="grid-template-columns:1.4fr 1fr 1.5fr">'
+            + combined
+            + tile("Trend breadth", breadth, "cells up", bcol)
+            + tile("Next high-impact", nh_val, nh_sub, AMBER)
+            + '</div>')
 
 
 # ---------------------------------------------------------------------------
