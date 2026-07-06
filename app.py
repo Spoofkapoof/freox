@@ -162,8 +162,8 @@ MAJOR_PAIRS = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "USDCAD", "AUDUSD", "NZDU
 # Minor pairs = the major crosses (no USD leg).
 MINOR_PAIRS = [p for p in d.PAIRS_28 if p not in MAJOR_PAIRS]
 ALL_SYMBOLS = d.PAIRS_28 + EXTRA
-# Default: majors, then minors, then gold + BTC pinned to the bottom.
-DEFAULT_WATCH = MAJOR_PAIRS + MINOR_PAIRS + EXTRA
+# Default watchlist = the 7 majors + gold + BTC (minors are opt-in via the picker).
+DEFAULT_WATCH = MAJOR_PAIRS + EXTRA
 IMPACT_DOT = {"High": DOWN, "Medium": AMBER, "Low": "#4a90d9", "Holiday": MUT}
 ARROW_COL = {"▲▲": UP, "▲": UP_DIM, "▼": DOWN_DIM, "▼▼": DOWN, "·": MUT}
 
