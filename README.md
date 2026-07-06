@@ -1,6 +1,6 @@
 # Freox — Live Forex Cockpit
 
-![Version](https://img.shields.io/badge/version-0.1.0-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-0.2.0-blue?style=for-the-badge)
 ![Beta](https://img.shields.io/badge/status-BETA-ff8c00?style=for-the-badge)
 ![Work in progress](https://img.shields.io/badge/work%20in%20progress-yes-ffb020?style=for-the-badge)
 

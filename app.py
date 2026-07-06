@@ -74,7 +74,7 @@ AMBER   = "#ffb020"
 INK     = "#d7dde8"
 MUT     = "#6b7688"
 
-VERSION = "0.1"   # beta — bump on each release
+VERSION = "0.2"   # beta — bump on each release
 
 st.set_page_config(page_title="FREOX ▮ FX Cockpit", page_icon="💹",
                    layout="wide", initial_sidebar_state="collapsed")
@@ -93,6 +93,13 @@ st.markdown(f"""<style>
           padding:.5rem .65rem;margin-bottom:.55rem;}}
   .panel h4{{margin:0 0 .4rem 0;color:{MUT};font:600 11px/1 'JetBrains Mono',monospace;
              letter-spacing:.16em;text-transform:uppercase;}}
+
+  /* window box: a Streamlit bordered container styled as a terminal panel —
+     lets widgets (sort controls) live in the SAME box as the title + table */
+  div[data-testid="stVerticalBlockBorderWrapper"]{{background:{PANEL};
+      border:1px solid {BORDER}!important;border-radius:8px;margin-bottom:.55rem;}}
+  .wtitle{{margin:.1rem 0 .5rem 0;color:{MUT};font:600 11px/1 'JetBrains Mono',monospace;
+           letter-spacing:.16em;text-transform:uppercase;text-align:center;}}
 
   /* header */
   .hdr{{display:flex;align-items:center;gap:.8rem;padding:.15rem .1rem .5rem;}}
@@ -130,16 +137,19 @@ st.markdown(f"""<style>
 
   /* news feed */
   .feed{{max-height:520px;overflow-y:auto;}}
-  .nrow{{display:grid;grid-template-columns:52px 40px 1fr auto;gap:.5rem;
+  /* whole row is one clickable link */
+  a.nrow{{display:grid;grid-template-columns:52px 40px 1fr auto;gap:.5rem;
          align-items:center;padding:.4rem .3rem;border-bottom:1px solid #12171f;
-         font:600 12px/1.25 'JetBrains Mono',monospace;}}
+         font:600 12px/1.25 'JetBrains Mono',monospace;
+         text-decoration:none;color:inherit;cursor:pointer;
+         border-radius:4px;transition:background .1s;}}
+  a.nrow:hover{{background:#141b26;}}
+  a.nrow:hover .ev{{color:{UP};}}
   .nrow .t{{color:{MUT};}}
   .badge{{display:inline-block;padding:.1rem .3rem;border-radius:4px;font-size:10px;
           font-weight:800;text-align:center;letter-spacing:.05em;
           background:#14202e;color:{INK};border:1px solid {BORDER};}}
   .nrow .ev{{color:{INK};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}}
-  .nrow .ev a{{color:{INK};text-decoration:none;}}
-  .nrow .ev a:hover{{color:{UP};text-decoration:underline;}}
   .nrow .cd{{color:{MUT};font-size:11px;text-align:right;}}
   .nrow.next{{background:linear-gradient(90deg,#10261c,transparent);
               border-left:2px solid {UP};}}
@@ -350,13 +360,12 @@ def news_feed(cal, now):
         link = ("https://www.google.com/search?tbm=nws&q=" +
                 quote_plus(f'{ev["currency"]} {ev["title"]}'))
         rows += (
-            f'<div class="nrow{nxt}">'
+            f'<a class="nrow{nxt}" href="{link}" target="_blank" rel="noopener">'
             f'<span class="t">{ev["time"]:%a %H:%M}</span>'
             f'<span class="badge">{_esc(ev["currency"])}</span>'
             f'<span class="ev"><span style="color:{dot}">&#9679;</span> '
-            f'<a href="{link}" target="_blank" rel="noopener">'
-            f'{_esc(ev["title"])} ↗</a></span>'
-            f'<span class="cd">{cd}</span></div>')
+            f'{_esc(ev["title"])} ↗</span>'
+            f'<span class="cd">{cd}</span></a>')
     return f'{banner}<div class="feed">{rows}</div>'
 
 
@@ -425,14 +434,38 @@ def kpi_strip(pairs, quotes, strength, trends, cal, now):
     up = sum(1 for c in cells if c > 0)
     breadth = f"{up}/{len(cells)}"
     bcol = UP if up * 2 >= len(cells) else DOWN
-    # next high-impact
-    hi = cal[(cal["impact"] == "High") & (cal["time"] >= now)] if not cal.empty else pd.DataFrame()
-    if not hi.empty:
-        nh = hi.iloc[0]
-        nh_val = f'{nh["currency"]} {_countdown(nh["time"], now)}'
-        nh_sub = _esc(nh["title"])[:26]
+    # next up-to-3 high-impact events (ccy + countdown; title on the first)
+    hi = (cal[(cal["impact"] == "High") & (cal["time"] >= now)].head(3)
+          if not cal.empty else pd.DataFrame())
+    if hi.empty:
+        hi_body = (f'<div class="val" style="color:{MUT}">—</div>'
+                   f'<div class="sub">no high-impact ahead</div>')
     else:
-        nh_val, nh_sub = "—", "no high-impact ahead"
+        events = list(hi.iterrows())
+        aligns = ["left", "center", "right"]
+        cells = []
+        for i in range(3):
+            al = aligns[i]
+            if i < len(events):
+                _, ev = events[i]
+                ccy, cd = _esc(ev["currency"]), _countdown(ev["time"], now)
+                title = _esc(ev["title"])
+                title = (title[:13] + "…") if len(title) > 13 else title
+                cells.append(
+                    f'<div style="text-align:{al};min-width:0;flex:1">'
+                    f'<div style="font:700 15px/1.25 \'JetBrains Mono\',monospace;white-space:nowrap">'
+                    f'<span style="color:{DOWN}">{ccy}</span> '
+                    f'<span style="color:{INK}">{cd}</span></div>'
+                    f'<div class="sub" style="color:{MUT};white-space:nowrap;'
+                    f'overflow:hidden;text-overflow:ellipsis">{title}</div></div>')
+            else:
+                cells.append(f'<div style="text-align:{al};flex:1">'
+                             f'<div class="val" style="color:{MUT};font-size:15px">—</div></div>')
+        hi_body = ('<div style="display:flex;justify-content:space-between;'
+                   'align-items:flex-start;gap:.5rem;margin-top:.15rem">'
+                   + "".join(cells) + '</div>')
+    hi_tile = f'<div class="kpi"><div class="lab">Next High-Impact</div>{hi_body}</div>'
+
     def tile(lab, val, sub, col):
         return (f'<div class="kpi"><div class="lab">{lab}</div>'
                 f'<div class="val" style="color:{col}">{_esc(val)}</div>'
@@ -456,7 +489,7 @@ def kpi_strip(pairs, quotes, strength, trends, cal, now):
     return ('<div class="kpis" style="grid-template-columns:1.4fr 1fr 1.5fr">'
             + combined
             + tile("Trend breadth", breadth, "cells up", bcol)
-            + tile("Next high-impact", nh_val, nh_sub, AMBER)
+            + hi_tile
             + '</div>')
 
 
@@ -505,46 +538,51 @@ def cockpit():
     _STATIC = {"displayModeBar": False, "staticPlot": True, "scrollZoom": False}
 
     with left:
-        # title box — centered title + the Vol/D legend inside it
-        st.markdown(
-            f'<div class="panel" style="margin-bottom:.3rem">'
-            f'<h4 style="text-align:center">Pair Monitor</h4>'
-            f'<div style="color:{MUT};font:500 10px/1.4 monospace;text-align:center">'
-            f'Vol/D = avg daily range (ATR-14): pips · pt gold · $ btc · '
-            f'<span style="color:{DOWN}">■</span> wild '
-            f'<span style="color:{AMBER}">■</span> elevated '
-            f'<span style="color:{INK}">■</span> normal '
-            f'<span style="color:{MUT}">■</span> quiet</div></div>',
-            unsafe_allow_html=True)
-        sc1, sc2 = st.columns([3, 2], gap="small")
-        sort_by = sc1.selectbox("Sort by", ["Default", "Day %", "Vol"] + tfs,
-                                index=0, key="sort_by")
-        sort_desc = sc2.radio("Order", ["High→Low", "Low→High"], index=0,
-                              horizontal=True, key="sort_order") == "High→Low"
-        ordered = order_pairs(watch, quotes, trends, atrs, sort_by, sort_desc)
-
-        st.markdown('<div class="panel">' +
-                    monitor_table(ordered, quotes, trends, atrs) + '</div>',
-                    unsafe_allow_html=True)
+        # ── Pair Monitor: title + legend + sort controls + table, ALL one box ──
+        with st.container(border=True):
+            st.markdown(
+                f'<div class="wtitle">Pair Monitor</div>'
+                f'<div style="color:{MUT};font:500 10px/1.4 monospace;text-align:center;'
+                f'margin-bottom:.4rem">'
+                f'Vol/D = avg daily range (ATR-14): pips · pt gold · $ btc · '
+                f'<span style="color:{DOWN}">■</span> wild '
+                f'<span style="color:{AMBER}">■</span> elevated '
+                f'<span style="color:{INK}">■</span> normal '
+                f'<span style="color:{MUT}">■</span> quiet</div>',
+                unsafe_allow_html=True)
+            sc1, sc2 = st.columns([3, 2], gap="small")
+            sort_by = sc1.selectbox("Sort by", ["Default", "Day %", "Vol"] + tfs,
+                                    index=0, key="sort_by")
+            sort_desc = sc2.radio("Order", ["High→Low", "Low→High"], index=0,
+                                  horizontal=True, key="sort_order") == "High→Low"
+            ordered = order_pairs(watch, quotes, trends, atrs, sort_by, sort_desc)
+            st.markdown(monitor_table(ordered, quotes, trends, atrs),
+                        unsafe_allow_html=True)
 
     with mid:
-        strong, weak = strength.index[0], strength.index[-1]
-        st.markdown(
-            f'<div class="panel"><h4 style="text-align:center">Trend Heatmap · pair × TF</h4>'
-            f'<div style="color:{INK};font:600 12px/1.5 monospace;text-align:center">'
-            f'▸ Cleanest bias: <span style="color:{UP}">LONG {strong}</span> / '
-            f'<span style="color:{DOWN}">SHORT {weak}</span><br>'
-            f'<span style="color:{MUT}">strongest vs weakest currency — '
-            f'look for the pair that is {strong}{weak} or {weak}{strong}</span></div></div>',
-            unsafe_allow_html=True)
-        st.plotly_chart(heatmap_fig(ordered, trends), width="stretch", config=_STATIC)
+        # ── Trend Heatmap: title + bias note + grid, all one box ──
+        with st.container(border=True):
+            strong, weak = strength.index[0], strength.index[-1]
+            st.markdown(
+                f'<div class="wtitle">Trend Heatmap · pair × TF</div>'
+                f'<div style="color:{INK};font:600 12px/1.5 monospace;text-align:center">'
+                f'▸ Cleanest bias: <span style="color:{UP}">LONG {strong}</span> / '
+                f'<span style="color:{DOWN}">SHORT {weak}</span><br>'
+                f'<span style="color:{MUT}">strongest vs weakest currency — '
+                f'look for the pair that is {strong}{weak} or {weak}{strong}</span></div>',
+                unsafe_allow_html=True)
+            st.plotly_chart(heatmap_fig(ordered, trends), width="stretch", config=_STATIC)
 
     with right:
-        st.markdown('<div class="panel"><h4>📰 Economic Calendar</h4>' +
-                    news_feed(cal, now) + '</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="panel"><h4>Currency Strength · {strength_period}</h4></div>',
-                    unsafe_allow_html=True)
-        st.plotly_chart(strength_fig(strength), width="stretch", config=_STATIC)
+        # ── Economic Calendar: one box ──
+        with st.container(border=True):
+            st.markdown('<div class="wtitle">📰 Economic Calendar</div>' +
+                        news_feed(cal, now), unsafe_allow_html=True)
+        # ── Currency Strength: title + chart, one box ──
+        with st.container(border=True):
+            st.markdown(f'<div class="wtitle">Currency Strength · {strength_period}</div>',
+                        unsafe_allow_html=True)
+            st.plotly_chart(strength_fig(strength), width="stretch", config=_STATIC)
 
     # data-source disclaimer (accuracy honesty)
     st.markdown(
