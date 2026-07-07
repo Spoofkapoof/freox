@@ -52,23 +52,29 @@ def pip_size(pair: str) -> float:
 def atr_volatility(pair: str, tf: str = "D1", n: int = 14) -> dict:
     """Average True Range volatility for a pair/instrument.
 
-    Returns {atr, pips, pct, tf}. `atr` = raw price-unit range, `pips` = in
-    pips, `pct` = ATR / price (normalized — comparable across FX, gold, crypto).
-    Uses Wilder's smoothing (the standard ATR).
+    Returns {atr, pips, pct, tf, day_range, day_vs_atr}. `atr` = raw price-unit
+    range, `pips` = in pips, `pct` = ATR / price (normalized). `day_range` =
+    today's high-low; `day_vs_atr` = today's range / ATR (how much of an average
+    day's movement has already happened — an FX "activity" proxy, since FX has
+    no real volume). Uses Wilder's smoothing (the standard ATR).
     """
     df = get_ohlc_tf(pair, tf)
     if df.empty or len(df) < n + 1:
-        return {"atr": None, "pips": None, "pct": None, "tf": tf}
+        return {"atr": None, "pips": None, "pct": None, "tf": tf,
+                "day_range": None, "day_vs_atr": None}
     h, l, c = df["high"], df["low"], df["close"]
     pc = c.shift(1)
     tr = pd.concat([h - l, (h - pc).abs(), (l - pc).abs()], axis=1).max(axis=1)
     atr = float(tr.ewm(alpha=1 / n, adjust=False).mean().iloc[-1])
     price = float(c.iloc[-1])
+    day_range = float(h.iloc[-1] - l.iloc[-1])
     return {
         "atr": atr,
         "pips": atr / pip_size(pair),
         "pct": atr / price * 100 if price else None,
         "tf": tf,
+        "day_range": day_range,
+        "day_vs_atr": (day_range / atr) if atr else None,
     }
 
 
@@ -80,11 +86,13 @@ def multi_tf_trend(pair: str, tfs=("M15", "H1", "H4", "D1")) -> dict:
     return out
 
 
-# period → (yahoo range, yahoo interval, bars-back defining the window)
+# period → (yahoo range, yahoo interval, bars-back defining the window).
+# 1D/1W use 1y/1d so they reuse the SAME cached daily fetch that trend + ATR
+# pull (position-based lookback → bit-identical to shorter ranges), saving calls.
 _STRENGTH_SPEC = {
     "24H": ("5d", "60m", 24),   # last 24 hourly bars
-    "1D":  ("1mo", "1d", 1),    # yesterday's close → now
-    "1W":  ("3mo", "1d", 5),    # last 5 trading days
+    "1D":  ("1y", "1d", 1),     # yesterday's close → now
+    "1W":  ("1y", "1d", 5),     # last 5 trading days
 }
 
 

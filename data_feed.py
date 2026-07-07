@@ -55,8 +55,21 @@ def _yahoo_symbol(pair: str) -> str:
     return f"{pair.upper()}=X"
 
 
+# Short-lived memo so identical OHLC requests within one refresh cycle hit the
+# network once. E.g. H1 & H4 share the same 60m fetch, and a pair's daily bars
+# are used by both trend and ATR — this dedupes them. TTL < the app refresh.
+_OHLC_CACHE: dict = {}
+_OHLC_TTL = 20.0
+
+
 def get_ohlc(pair: str, rng: str = "1mo", interval: str = "15m") -> pd.DataFrame:
-    """Return an OHLC DataFrame (tz-aware UTC index) for a pair, or empty on failure."""
+    """Return an OHLC DataFrame (tz-aware UTC index) for a pair, or empty on failure.
+    Successful results are memoized for a few seconds to avoid duplicate fetches."""
+    key = (pair, rng, interval)
+    cached = _OHLC_CACHE.get(key)
+    if cached is not None and time.monotonic() - cached[0] < _OHLC_TTL:
+        return cached[1]
+
     url = _YF.format(sym=_yahoo_symbol(pair), rng=rng, itv=interval)
     try:
         r = requests.get(url, headers=_UA, timeout=15)
@@ -77,8 +90,9 @@ def get_ohlc(pair: str, rng: str = "1mo", interval: str = "15m") -> pd.DataFrame
             "close": q.get("close"),
         },
         index=pd.to_datetime(ts, unit="s", utc=True),
-    )
-    return df.dropna(how="all").dropna(subset=["close"])
+    ).dropna(how="all").dropna(subset=["close"])
+    _OHLC_CACHE[key] = (time.monotonic(), df)
+    return df
 
 
 def get_ohlc_tf(pair: str, tf: str) -> pd.DataFrame:
@@ -98,7 +112,14 @@ def get_quote(pair: str) -> dict:
     """Live price + daily change %.
 
     Price = Yahoo's `regularMarketPrice` (freshest indicative mid).
-    Prev  = the prior *daily* close, so the change is a true day-over-day move.
+    Prev  = the 2nd-to-last DAILY CANDLE close (yesterday's completed close,
+    since the last candle is today's still-forming bar) → a true day-over-day
+    change.
+
+    ⚠️ Do NOT use `meta.chartPreviousClose` here: it is RANGE-DEPENDENT — on a
+    1y request it returns the price ~a year ago, not yesterday's close — so it
+    would silently turn "daily change" into a multi-day/annual change. Yahoo's
+    `previousClose`/`regularMarketPreviousClose` are null for FX (=X) symbols.
     """
     url = _YF.format(sym=_yahoo_symbol(pair), rng="5d", itv="1d")
     try:
@@ -114,9 +135,7 @@ def get_quote(pair: str) -> dict:
     price = meta.get("regularMarketPrice")
     if price is None:
         price = closes[-1] if closes else None
-    # prior daily close: if the last candle is today's, that's closes[-2];
-    # otherwise fall back to the last completed close.
-    prev = closes[-2] if len(closes) >= 2 else meta.get("chartPreviousClose")
+    prev = closes[-2] if len(closes) >= 2 else None
     chg = ((price - prev) / prev * 100) if (price and prev) else None
     return {"pair": pair, "price": price, "prev": prev, "change_pct": chg}
 

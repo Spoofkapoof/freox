@@ -20,3 +20,6 @@ env/
 Thumbs.db
 .idea/
 .vscode/
+
+# Private dev notes — never commit
+DEV_NOTES.md

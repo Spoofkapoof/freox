@@ -2,6 +2,29 @@
 
 All notable changes to Freox are documented here. Versioning is loose while in beta.
 
+## [0.2.1] — 2026-07-07 · beta
+
+### Added
+- **Top Setups** panel — shortlists the pairs whose timeframes are aligned (the highest-conviction
+  long/short setups), derived from the trend data.
+- Settings now **survive a hard page refresh** — watchlist, timeframes, sort, filters, and strength
+  window persist via URL query params (also makes the view shareable/bookmarkable).
+
+### Changed
+- **"Trend breadth" KPI → "Market Activity"** — measures how much the market is actually moving
+  (today's range vs average daily range) rather than trend direction, since in FX you trade both ways.
+- Each window consolidated into a single bordered box (title + controls + content together).
+- Next High-Impact KPI shows the next 3 events left→right; Economic Calendar rows are fully clickable.
+- Watchlist dropdown centered under its button.
+
+### Fixed / Efficiency
+- **~⅓ fewer network calls** — a short OHLC memo cache dedupes the shared H1/H4 and daily fetches;
+  currency-strength reuses the cached daily data.
+- Data cache TTL aligned to the 30s refresh so data + timestamp move in lockstep.
+- Verified accuracy end-to-end (prices ~99.8% vs independent sources, ATR exact, strength correct);
+  confirmed the daily-change convention (live vs prior daily close) and documented the
+  `chartPreviousClose` range-dependency trap.
+
 ## [0.2.0] — 2026-07-06 · beta
 
 ### Changed

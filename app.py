@@ -28,7 +28,7 @@ import indicators as ind
 import concurrent.futures as _cf
 
 
-@st.cache_data(ttl=45, show_spinner=False)
+@st.cache_data(ttl=30, show_spinner=False)
 def gather_pairs(watch, tfs):
     """Fetch quote + multi-TF trend + ATR for every pair IN PARALLEL.
 
@@ -74,7 +74,7 @@ AMBER   = "#ffb020"
 INK     = "#d7dde8"
 MUT     = "#6b7688"
 
-VERSION = "0.2"   # beta — bump on each release
+VERSION = "0.2.1"   # beta — bump on each release
 
 st.set_page_config(page_title="FREOX ▮ FX Cockpit", page_icon="💹",
                    layout="wide", initial_sidebar_state="collapsed")
@@ -102,7 +102,7 @@ st.markdown(f"""<style>
            letter-spacing:.16em;text-transform:uppercase;text-align:center;}}
 
   /* header */
-  .hdr{{display:flex;align-items:center;gap:.8rem;padding:.15rem .1rem .5rem;}}
+  .hdr{{display:flex;align-items:center;gap:.7rem;padding:.15rem .1rem;}}
   .logo{{font:800 20px/1 'JetBrains Mono',monospace;color:{INK};letter-spacing:.28em;}}
   .logo b{{color:{UP};}}
   .live{{display:inline-flex;align-items:center;gap:.4rem;color:{UP};
@@ -156,11 +156,20 @@ st.markdown(f"""<style>
   .feed::-webkit-scrollbar{{width:7px;}} .feed::-webkit-scrollbar-track{{background:{PANEL};}}
   .feed::-webkit-scrollbar-thumb{{background:{BORDER};border-radius:4px;}}
 
-  /* watchlist popover trigger — match the terminal look */
+  /* Watchlist popover trigger — match the terminal look */
   [data-testid="stPopover"] button{{background:{PANEL}!important;border:1px solid {BORDER}!important;
     color:{INK}!important;font:700 12px/1 'JetBrains Mono',monospace!important;
     letter-spacing:.1em;}}
   [data-testid="stPopover"] button:hover{{border-color:{UP}!important;color:{UP}!important;}}
+  /* Centre the Watchlist dropdown on screen. The button is already page-centred,
+     so centring the panel on the viewport aligns it under the button — no width
+     math, no per-pixel guessing. Full-override of floating-ui's positioning. */
+  [data-testid="stPopoverBody"]{{
+    position:fixed!important;
+    left:50%!important; right:auto!important; top:64px!important;
+    transform:translateX(-50%)!important;
+    max-height:80vh;overflow-y:auto;
+  }}
 
   /* ── stop the auto-refresh dim/flicker ── */
   [data-stale="true"]{{opacity:1!important;transition:none!important;filter:none!important;}}
@@ -185,6 +194,50 @@ ALL_SYMBOLS = MAJOR_PAIRS + MINOR_PAIRS + EXTRA
 DEFAULT_WATCH = MAJOR_PAIRS
 IMPACT_DOT = {"High": DOWN, "Medium": AMBER, "Low": "#4a90d9", "Holiday": MUT}
 ARROW_COL = {"▲▲": UP, "▲": UP_DIM, "▼": DOWN_DIM, "▼▼": DOWN, "·": MUT}
+NEWS_LEVELS = ["High", "Medium", "Low", "Holiday"]
+
+# ---------------------------------------------------------------------------
+# Restore every setting from the URL query params on a fresh page load, so
+# filters/watchlist survive a HARD browser refresh (session_state alone resets
+# on reload). Runs once per session; widgets then read from session_state, and
+# the cockpit writes the current settings back to the URL each render.
+# ---------------------------------------------------------------------------
+if not st.session_state.get("_settings_restored"):
+    _qp = st.query_params
+
+    def _csv(key, valid, default):
+        raw = _qp.get(key)
+        if raw is None:
+            return list(default)
+        picked = [x for x in raw.split(",") if x in valid]
+        return picked or list(default)
+
+    st.session_state["tfs_sel"] = _csv("tfs", TF_ALL, TF_ALL)
+    st.session_state["news_impacts"] = _csv("ni", NEWS_LEVELS, ["High", "Medium"])
+    _sp = _qp.get("sp"); st.session_state["strength_period"] = _sp if _sp in ("24H", "1D", "1W") else "24H"
+    _rf = _qp.get("rf"); st.session_state["refresh_lbl"] = _rf if _rf in ("Off", "15s", "30s", "60s") else "30s"
+    _so = _qp.get("so"); st.session_state["sort_order"] = _so if _so in ("High→Low", "Low→High") else "High→Low"
+    st.session_state["sort_by"] = _qp.get("sb") or "Default"
+    _wl = _qp.get("wl")
+    _watched = ({x for x in _wl.split(",") if x in ALL_SYMBOLS} if _wl is not None
+                else set(DEFAULT_WATCH))
+    for _p in ALL_SYMBOLS:
+        st.session_state[f"w_{_p}"] = _p in _watched
+    st.session_state["_settings_restored"] = True
+
+
+def persist_settings():
+    """Write current settings to the URL so a page refresh restores them."""
+    st.query_params.update({
+        "tfs": ",".join(st.session_state.get("tfs_sel", TF_ALL)),
+        "ni": ",".join(st.session_state.get("news_impacts", [])),
+        "sp": st.session_state.get("strength_period", "24H"),
+        "rf": st.session_state.get("refresh_lbl", "30s"),
+        "sb": st.session_state.get("sort_by", "Default"),
+        "so": st.session_state.get("sort_order", "High→Low"),
+        "wl": ",".join(p for p in ALL_SYMBOLS if st.session_state.get(f"w_{p}")),
+    })
+
 
 # ---------------------------------------------------------------------------
 # Sidebar (controls only — cockpit stays clean)
@@ -192,23 +245,18 @@ ARROW_COL = {"▲▲": UP, "▲": UP_DIM, "▼": DOWN_DIM, "▼▼": DOWN, "·":
 with st.sidebar:
     st.markdown("### CONTROLS")
     st.caption("Pairs are chosen from the **Watchlist** button up top.")
-    tfs = st.multiselect("Timeframes", TF_ALL, default=TF_ALL, key="tfs_sel")
+    tfs = st.multiselect("Timeframes", TF_ALL, key="tfs_sel")
     tfs = [t for t in TF_ALL if t in tfs] or TF_ALL
 
     strength_period = st.selectbox("Strength window", ["24H", "1D", "1W"],
-                                   index=0, key="strength_period")
+                                   key="strength_period")
     refresh_lbl = st.selectbox("Auto-refresh", ["Off", "15s", "30s", "60s"],
-                               index=2, key="refresh_lbl")
-    news_impacts = st.multiselect("News impact", ["High", "Medium", "Low", "Holiday"],
-                                  default=["High", "Medium"], key="news_impacts")
+                               key="refresh_lbl")
+    news_impacts = st.multiselect("News impact", NEWS_LEVELS, key="news_impacts")
     if st.button("Force refresh", width="stretch"):
         st.cache_data.clear(); st.rerun()
 
 _REFRESH = {"Off": None, "15s": 15, "30s": 30, "60s": 60}[refresh_lbl]
-
-# Persist watchlist checkbox state once; survives every auto-refresh rerun.
-for _p in ALL_SYMBOLS:
-    st.session_state.setdefault(f"w_{_p}", _p in DEFAULT_WATCH)
 
 
 def _fmt_price(p):
@@ -263,23 +311,24 @@ def _wl_toggle(group):
 
 
 def watchlist_picker():
-    """Grouped checkboxes to add/remove instruments. Returns the selected list
-    (in ALL_SYMBOLS order). State lives in session_state, so it survives refreshes."""
+    """The instrument picker (rendered inside the Watchlist popover). Toggle
+    buttons set state BEFORE the checkboxes render below, so no st.rerun() is
+    needed. Returns the selected list."""
     st.markdown("**Select instruments to monitor**")
     # per-tab toggle buttons: tick/untick a whole group without touching others.
     # Metal/Crypto is just 2 items, so no button for it — tick them directly.
     qa = st.columns(3)
     if qa[0].button("Majors", key="wl_maj", width="stretch"):
-        _wl_toggle(MAJOR_PAIRS); st.rerun()
+        _wl_toggle(MAJOR_PAIRS)
     if qa[1].button("Minors 1", key="wl_min1", width="stretch"):
-        _wl_toggle(MINORS_1); st.rerun()
+        _wl_toggle(MINORS_1)
     if qa[2].button("Minors 2", key="wl_min2", width="stretch"):
-        _wl_toggle(MINORS_2); st.rerun()
+        _wl_toggle(MINORS_2)
     qb = st.columns(2)
     if qb[0].button("Select all", key="wl_all", width="stretch"):
-        _wl_set_only(ALL_SYMBOLS); st.rerun()
+        _wl_set_only(ALL_SYMBOLS)
     if qb[1].button("Clear", key="wl_clr", width="stretch"):
-        _wl_set_only([]); st.rerun()
+        _wl_set_only([])
 
     groups = [("Majors", MAJOR_PAIRS), ("Minors 1", MINORS_1),
               ("Minors 2", MINORS_2), ("Metal / Crypto", EXTRA)]
@@ -329,6 +378,42 @@ def monitor_table(pairs, quotes, trends, atrs):
     return (f'<table class="term"><thead><tr><th>Pair</th>'
             f'<th>Δ Day</th><th>Vol/D</th>{head}</tr></thead>'
             f'<tbody>{body}</tbody></table>')
+
+
+def top_setups_html(pairs, trends):
+    """Shortlist the pairs whose timeframes lean the same way — the aligned-trend
+    setups. Ranks by total trend score; a fully-aligned pair (all TFs same
+    direction) is bold. Two columns: LONGS (net-up) and SHORTS (net-down)."""
+    rows = []
+    for p in pairs:
+        scores = [trends[p][t]["score"] for t in tfs]
+        total = sum(scores)
+        aligned = all(s > 0 for s in scores) or all(s < 0 for s in scores)
+        arrows = "".join("▲" if s > 0 else ("▼" if s < 0 else "·") for s in scores)
+        rows.append((p, total, aligned, arrows))
+    longs = sorted([r for r in rows if r[1] > 0], key=lambda x: -x[1])[:5]
+    shorts = sorted([r for r in rows if r[1] < 0], key=lambda x: x[1])[:5]
+
+    def col(items, color, head):
+        h = (f'<div class="sub" style="color:{color};text-align:center;'
+             f'font-weight:700;margin-bottom:.25rem">{head}</div>')
+        if not items:
+            return h + f'<div class="sub" style="color:{MUT};text-align:center">—</div>'
+        body = ""
+        for p, total, aligned, arrows in items:
+            weight = 800 if aligned else 600
+            star = "★ " if aligned else ""
+            body += (f'<div style="display:flex;justify-content:space-between;'
+                     f'font:{weight} 12px/1.6 \'JetBrains Mono\',monospace;color:{color}">'
+                     f'<span>{star}{p}</span>'
+                     f'<span style="letter-spacing:1px">{arrows}</span></div>')
+        return h + body
+
+    return (f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:.7rem;margin-top:.2rem">'
+            f'<div>{col(longs, UP, "LONGS ▲")}</div>'
+            f'<div>{col(shorts, DOWN, "SHORTS ▼")}</div></div>'
+            f'<div class="sub" style="color:{MUT};text-align:center;margin-top:.3rem">'
+            f'★ = all timeframes aligned · arrows = M15·H1·H4·D1</div>')
 
 
 def news_feed(cal, now):
@@ -419,7 +504,7 @@ def heatmap_fig(pairs, trends):
     return fig
 
 
-def kpi_strip(pairs, quotes, strength, trends, cal, now):
+def kpi_strip(pairs, quotes, atrs, strength, trends, cal, now):
     strong, weak = strength.index[0], strength.index[-1]
     # biggest daily mover among the watched pairs
     movers = [(p, quotes[p]["change_pct"]) for p in pairs
@@ -429,11 +514,24 @@ def kpi_strip(pairs, quotes, strength, trends, cal, now):
         m_pair, m_sub, m_col = mp, f"{mc:+.2f}%", (UP if mc >= 0 else DOWN)
     else:
         m_pair, m_sub, m_col = "—", "", MUT
-    # breadth: share of (pair,tf) cells trending up
-    cells = [trends[p][t]["score"] for p in pairs for t in tfs]
-    up = sum(1 for c in cells if c > 0)
-    breadth = f"{up}/{len(cells)}"
-    bcol = UP if up * 2 >= len(cells) else DOWN
+    # market ACTIVITY (not trend direction — direction is irrelevant in FX, you
+    # trade both ways). Measures how much has actually moved today: today's range
+    # vs the average daily range (ATR), averaged across pairs. FX has no real
+    # volume, so realized range is the standard activity/volume proxy.
+    acts = [atrs[p]["day_vs_atr"] for p in pairs
+            if atrs[p].get("day_vs_atr") is not None]
+    market_act = (sum(acts) / len(acts)) if acts else 0.0
+    if market_act >= 0.80:
+        mkt_phrase, mkt_col = "High volatility — active market", UP
+    elif market_act >= 0.45:
+        mkt_phrase, mkt_col = "Normal activity — average day", AMBER
+    else:
+        mkt_phrase, mkt_col = "Low volatility — quiet market", DOWN
+    mkt_tile = (
+        f'<div class="kpi"><div class="lab">Market Activity</div>'
+        f'<div style="color:{mkt_col};font:700 13px/1.35 \'JetBrains Mono\',monospace;'
+        f'margin:.2rem 0">{mkt_phrase}</div>'
+        f'<div class="sub">{market_act*100:.0f}% of avg daily range</div></div>')
     # next up-to-3 high-impact events (ccy + countdown; title on the first)
     hi = (cal[(cal["impact"] == "High") & (cal["time"] >= now)].head(3)
           if not cal.empty else pd.DataFrame())
@@ -488,7 +586,7 @@ def kpi_strip(pairs, quotes, strength, trends, cal, now):
 
     return ('<div class="kpis" style="grid-template-columns:1.4fr 1fr 1.5fr">'
             + combined
-            + tile("Trend breadth", breadth, "cells up", bcol)
+            + mkt_tile
             + hi_tile
             + '</div>')
 
@@ -501,7 +599,7 @@ def cockpit():
     now = d.now_utc()
     rlabel = "auto-refresh off" if _REFRESH is None else f"every {refresh_lbl}"
 
-    # top bar: logo/live | Watchlist popover | LAST UPDATED time
+    # top bar: logo/live | Watchlist toggle button | LAST UPDATED time
     hL, hMid, hR = st.columns([5, 2, 5], gap="small", vertical_alignment="center")
     with hL:
         st.markdown(
@@ -514,7 +612,7 @@ def cockpit():
             watch = watchlist_picker()
     with hR:
         st.markdown(
-            f'<div class="clock" style="text-align:right;padding-top:.4rem">'
+            f'<div class="clock" style="text-align:right">'
             f'LAST UPDATED&nbsp; {now:%Y-%m-%d %H:%M:%S} UTC</div>',
             unsafe_allow_html=True)
 
@@ -530,7 +628,7 @@ def cockpit():
     cal = c_calendar()
 
     # KPI strip
-    st.markdown(kpi_strip(watch, quotes, strength, trends, cal, now), unsafe_allow_html=True)
+    st.markdown(kpi_strip(watch, quotes, atrs, strength, trends, cal, now), unsafe_allow_html=True)
 
     # main grid: [monitor+strength] | [heatmap] | [news]
     left, mid, right = st.columns([5, 4, 3], gap="small")
@@ -551,13 +649,19 @@ def cockpit():
                 f'<span style="color:{MUT}">■</span> quiet</div>',
                 unsafe_allow_html=True)
             sc1, sc2 = st.columns([3, 2], gap="small")
-            sort_by = sc1.selectbox("Sort by", ["Default", "Day %", "Vol"] + tfs,
-                                    index=0, key="sort_by")
-            sort_desc = sc2.radio("Order", ["High→Low", "Low→High"], index=0,
+            _sopts = ["Default", "Day %", "Vol"] + tfs
+            if st.session_state.get("sort_by") not in _sopts:
+                st.session_state["sort_by"] = "Default"
+            sort_by = sc1.selectbox("Sort by", _sopts, key="sort_by")
+            sort_desc = sc2.radio("Order", ["High→Low", "Low→High"],
                                   horizontal=True, key="sort_order") == "High→Low"
             ordered = order_pairs(watch, quotes, trends, atrs, sort_by, sort_desc)
             st.markdown(monitor_table(ordered, quotes, trends, atrs),
                         unsafe_allow_html=True)
+        # ── Top Setups: aligned-trend shortlist derived from the heatmap ──
+        with st.container(border=True):
+            st.markdown('<div class="wtitle">Top Setups · aligned trends</div>' +
+                        top_setups_html(watch, trends), unsafe_allow_html=True)
 
     with mid:
         # ── Trend Heatmap: title + bias note + grid, all one box ──
@@ -592,6 +696,9 @@ def cockpit():
         f'may differ from your broker, not for execution. '
         f'Calendar: Forex Factory. Strength/trend/vol computed locally. '
         f'All times UTC.</div>', unsafe_allow_html=True)
+
+    # persist all current settings to the URL so a page refresh restores them
+    persist_settings()
 
 
 cockpit()
