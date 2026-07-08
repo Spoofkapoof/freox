@@ -20,10 +20,12 @@ import requests
 _CACHE_DIR = Path(__file__).resolve().parent / ".cache"
 _CACHE_DIR.mkdir(exist_ok=True)
 _CAL_CACHE = _CACHE_DIR / "ff_calendar_thisweek.json"
+_CAL_CACHE_NEXT = _CACHE_DIR / "ff_calendar_nextweek.json"
 
 _UA = {"User-Agent": "Mozilla/5.0 (Freox dashboard)"}
 _YF = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}?range={rng}&interval={itv}"
 _FF = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+_FF_NEXT = "https://nfs.faireconomy.media/ff_calendar_nextweek.json"
 
 # 8 majors → the 28 conventional pairs built from them.
 MAJORS = ["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD"]
@@ -59,7 +61,7 @@ def _yahoo_symbol(pair: str) -> str:
 # network once. E.g. H1 & H4 share the same 60m fetch, and a pair's daily bars
 # are used by both trend and ATR — this dedupes them. TTL < the app refresh.
 _OHLC_CACHE: dict = {}
-_OHLC_TTL = 20.0
+_OHLC_TTL = 4.0   # < the 5s refresh: dedupes within a cycle, refreshes between cycles
 
 
 def get_ohlc(pair: str, rng: str = "1mo", interval: str = "15m") -> pd.DataFrame:
@@ -146,17 +148,18 @@ def get_quote(pair: str) -> dict:
 _IMPACT_RANK = {"High": 3, "Medium": 2, "Low": 1, "Holiday": 0, "": 0}
 
 
-def _fetch_calendar_raw() -> tuple[list | None, bool]:
-    """Return (events, stale). Tries the network (2 attempts, backoff); on any
-    failure — incl. HTTP 429 rate-limit — falls back to the last-good disk copy."""
+def _fetch_calendar_raw(url, cache_path) -> tuple[list | None, bool]:
+    """Return (events, stale) for one Forex Factory feed. Tries the network
+    (2 attempts, backoff); on any failure — incl. HTTP 429 rate-limit — falls
+    back to the last-good disk copy at `cache_path`."""
     for attempt in range(2):
         try:
-            r = requests.get(_FF, headers=_UA, timeout=15)
+            r = requests.get(url, headers=_UA, timeout=15)
             # 429 returns an HTML error page, not JSON — guard on both.
             if r.status_code == 200 and r.text.lstrip().startswith("["):
                 data = r.json()
                 try:
-                    _CAL_CACHE.write_text(json.dumps(data))
+                    cache_path.write_text(json.dumps(data))
                 except Exception:
                     pass
                 return data, False
@@ -165,9 +168,9 @@ def _fetch_calendar_raw() -> tuple[list | None, bool]:
         if attempt == 0:
             time.sleep(1.5)
     # network failed → serve last-good cache if we have one
-    if _CAL_CACHE.exists():
+    if cache_path.exists():
         try:
-            return json.loads(_CAL_CACHE.read_text()), True
+            return json.loads(cache_path.read_text()), True
         except Exception:
             pass
     return None, False
@@ -175,9 +178,13 @@ def _fetch_calendar_raw() -> tuple[list | None, bool]:
 
 def get_calendar() -> pd.DataFrame:
     """This week's economic events. Columns: time, currency, impact, title,
-    forecast, previous, impact_rank. Times are tz-aware (UTC). Carries
-    df.attrs['stale'] = True when served from the disk fallback."""
-    data, stale = _fetch_calendar_raw()
+    forecast, previous, impact_rank, next_week. Times are tz-aware (UTC). Carries
+    df.attrs['stale'] = True when served from the disk fallback.
+
+    NOTE: Forex Factory's free feed only publishes THIS week — the nextweek/
+    lastweek/etc. URLs all 404. So `next_week` is always False here; genuine
+    next-week data would need a keyed source (e.g. Financial Modeling Prep)."""
+    data, stale = _fetch_calendar_raw(_FF, _CAL_CACHE)
     if not data:
         return pd.DataFrame()
 
@@ -191,6 +198,7 @@ def get_calendar() -> pd.DataFrame:
                 "title": ev.get("title", ""),
                 "forecast": ev.get("forecast", ""),
                 "previous": ev.get("previous", ""),
+                "next_week": False,
             }
         )
     df = pd.DataFrame(rows)

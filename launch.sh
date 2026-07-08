@@ -15,7 +15,21 @@ else
   source .venv/bin/activate
 fi
 
-echo "Starting Freox — open http://127.0.0.1:8502 once it's ready. Keep this terminal open."
+echo "Starting Freox — the browser will open at http://127.0.0.1:8502. Keep this terminal open."
+
+# Auto-open the browser once the server is actually listening (Firefox first,
+# then the system default). Runs in the background so it doesn't block streamlit.
+URL="http://127.0.0.1:8502"
+(
+  for _ in $(seq 1 60); do
+    (echo >/dev/tcp/127.0.0.1/8502) >/dev/null 2>&1 && break
+    sleep 0.25
+  done
+  firefox "$URL" >/dev/null 2>&1 \
+    || xdg-open "$URL" >/dev/null 2>&1 \
+    || open "$URL" >/dev/null 2>&1 \
+    || true
+) &
 
 exec streamlit run app.py \
   --server.headless true \

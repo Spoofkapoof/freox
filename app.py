@@ -5,7 +5,7 @@ Single-screen command center (no tabs), trading-terminal styling:
   • KPI strip      — strongest/weakest ccy, next high-impact event, breadth
   • Strength bar   — 8-currency relative strength
   • Pair Monitor   — live price, daily Δ, multi-timeframe trend arrows
-  • Trend Heatmap  — pairs × timeframes grid
+  • Vol Heatmap    — pairs × timeframes, how hot each is running right now
   • News feed      — this week's economic calendar w/ live countdown
 
 Data: Yahoo Finance (prices) + Forex Factory (calendar). No API keys.
@@ -13,14 +13,17 @@ Run:  bash launch.sh   (or: streamlit run app.py)
 """
 from __future__ import annotations
 
+import json
 from urllib.parse import quote_plus
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 import data_feed as d
 import indicators as ind
+import sessions as sess
 
 # ---------------------------------------------------------------------------
 # Cached data wrappers
@@ -28,7 +31,7 @@ import indicators as ind
 import concurrent.futures as _cf
 
 
-@st.cache_data(ttl=30, show_spinner=False)
+@st.cache_data(ttl=5, show_spinner=False)   # 5s so numbers stay live-market fresh
 def gather_pairs(watch, tfs):
     """Fetch quote + multi-TF trend + ATR for every pair IN PARALLEL.
 
@@ -40,6 +43,7 @@ def gather_pairs(watch, tfs):
         return p, {
             "quote": d.get_quote(p),
             "trend": ind.multi_tf_trend(p, tfs),
+            "heat": ind.multi_tf_heat(p, tfs),   # per-TF activity for the vol heatmap
             "atr": ind.atr_volatility(p, "D1"),
         }
 
@@ -60,6 +64,25 @@ def c_calendar():
     return d.get_calendar()
 
 
+CORR_WINDOW = 34   # daily returns (Fibonacci ~7 weeks) — recent correlation
+CORR_MAX = 12      # cap displayed pairs so the matrix stays readable
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def c_correlation(watch, window=CORR_WINDOW):
+    """Pairwise correlation of the last `window` DAILY returns across `watch`.
+    Slow-moving, so cached 5 min. Returns a pairs×pairs DataFrame, or None."""
+    closes = {}
+    for p in watch:
+        df = d.get_ohlc_tf(p, "D1")
+        if not df.empty and len(df) > 2:
+            closes[p] = df["close"]
+    if len(closes) < 2:
+        return None
+    rets = pd.DataFrame(closes).pct_change().tail(window)
+    return rets.corr()
+
+
 # ---------------------------------------------------------------------------
 # Palette (trading terminal)
 # ---------------------------------------------------------------------------
@@ -74,7 +97,21 @@ AMBER   = "#ffb020"
 INK     = "#d7dde8"
 MUT     = "#6b7688"
 
-VERSION = "0.2.1"   # beta — bump on each release
+VERSION = "0.3"   # beta — bump on each release
+GITHUB_URL = "https://github.com/Spoofkapoof/freox"
+GITHUB_HTML = (
+    f'<a class="ghlink" href="{GITHUB_URL}" target="_blank" rel="noopener"'
+    ' title="View Freox on GitHub" aria-label="Freox on GitHub">'
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" '
+    'd="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19'
+    '-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15'
+    '-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87'
+    '.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08'
+    '-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 '
+    '2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75'
+    '-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 '
+    '8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg></a>'
+)
 
 st.set_page_config(page_title="FREOX ▮ FX Cockpit", page_icon="💹",
                    layout="wide", initial_sidebar_state="collapsed")
@@ -87,6 +124,15 @@ st.markdown(f"""<style>
   section[data-testid="stSidebar"]{{background:{PANEL};border-right:1px solid {BORDER};}}
   * {{font-variant-numeric:tabular-nums;}}
   code,.mono{{font-family:'JetBrains Mono','SFMono-Regular',Consolas,monospace;}}
+
+  /* soften the 30s auto-refresh: fade each window in from ~55% opacity instead
+     of a hard flicker when the fragment repaints. One keyframe, no JS. Charts
+     live inside these containers, so the whole window fades as one block. */
+  @keyframes freoxFade{{from{{opacity:.55;}}to{{opacity:1;}}}}
+  div[data-testid="stVerticalBlockBorderWrapper"],.kpis{{
+     animation:freoxFade .35s ease-out;}}
+  @media (prefers-reduced-motion:reduce){{
+     div[data-testid="stVerticalBlockBorderWrapper"],.kpis{{animation:none;}}}}
 
   /* panels */
   .panel{{background:{PANEL};border:1px solid {BORDER};border-radius:8px;
@@ -135,8 +181,25 @@ st.markdown(f"""<style>
   table.term td:first-child{{text-align:left;color:{INK};font-weight:700;letter-spacing:.05em;}}
   table.term tr:hover td{{background:#111722;}}
 
+  /* volatility heatmap (HTML cells → no canvas repaint, no flicker) */
+  table.heat{{width:100%;border-collapse:separate;border-spacing:3px;
+              margin-top:.35rem;font:700 12px/1 'JetBrains Mono',monospace;}}
+  table.heat th{{color:{MUT};font:600 10px/1 'JetBrains Mono',monospace;
+                 letter-spacing:.1em;padding:.15rem 0 .3rem;text-align:center;}}
+  table.heat td{{text-align:center;padding:.55rem .2rem;border-radius:4px;
+                 color:#eef2f8;text-shadow:0 1px 2px rgba(0,0,0,.55);
+                 transition:background .3s ease;}}
+  table.heat td.pl{{text-align:left;background:transparent!important;color:{INK};
+                    font-weight:700;letter-spacing:.04em;text-shadow:none;
+                    width:76px;padding-left:.1rem;}}
+  /* correlation matrix: many narrow columns → smaller, tighter cells */
+  table.corr{{font-size:11px;}}
+  table.corr th{{font-size:9px;letter-spacing:.02em;}}
+  table.corr td{{padding:.42rem .1rem;}}
+  table.corr td.pl{{width:60px;font-size:11px;}}
+
   /* news feed */
-  .feed{{max-height:520px;overflow-y:auto;}}
+  .feed{{overflow:visible;}}  /* no inner scroll — the 10 rows size the panel */
   /* whole row is one clickable link */
   a.nrow{{display:grid;grid-template-columns:52px 40px 1fr auto;gap:.5rem;
          align-items:center;padding:.4rem .3rem;border-bottom:1px solid #12171f;
@@ -161,6 +224,24 @@ st.markdown(f"""<style>
     color:{INK}!important;font:700 12px/1 'JetBrains Mono',monospace!important;
     letter-spacing:.1em;}}
   [data-testid="stPopover"] button:hover{{border-color:{UP}!important;color:{UP}!important;}}
+  /* FX session bar */
+  .sessbar{{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;
+            background:{PANEL};border:1px solid {BORDER};border-radius:8px;
+            padding:.34rem .6rem;margin-bottom:.55rem;
+            font:600 11px/1 'JetBrains Mono',monospace;}}
+  .sess{{padding:.28rem .55rem;border-radius:5px;letter-spacing:.09em;
+         border:1px solid {BORDER};color:{MUT};text-transform:uppercase;}}
+  .sess.on{{color:{BG};background:{UP};border-color:{UP};font-weight:800;
+            box-shadow:0 0 8px rgba(0,226,138,.35);}}
+  .sess-note{{margin-left:.35rem;letter-spacing:.04em;}}
+  .sess-next{{margin-left:auto;color:{MUT};letter-spacing:.04em;}}
+
+  /* GitHub repo link — styled to match the popover buttons, sits next to ⚙ */
+  .ghlink{{display:flex;align-items:center;justify-content:center;height:38px;width:100%;
+           color:{MUT};background:{PANEL};border:1px solid {BORDER};border-radius:8px;
+           text-decoration:none;transition:border-color .12s,color .12s;}}
+  .ghlink:hover{{color:{UP};border-color:{UP};}}
+  .ghlink svg{{width:18px;height:18px;display:block;}}
   /* Centre the Watchlist dropdown on screen. The button is already page-centred,
      so centring the panel on the viewport aligns it under the button — no width
      math, no per-pixel guessing. Full-override of floating-ui's positioning. */
@@ -178,6 +259,54 @@ st.markdown(f"""<style>
   div[data-testid="stSpinner"]{{display:none!important;}}
   .stApp [data-testid="stAppViewBlockContainer"]{{opacity:1!important;}}
 </style>""", unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------
+# Number "roll" animation. Streamlit strips <script> from st.markdown, and a
+# components.html iframe is torn down on every rerun — so we inject a script
+# ONCE into the PARENT document (guarded by an id). Living in the parent realm,
+# it survives the 5s fragment refreshes. It watches every element with class
+# `roll` + data-k (stable id) + data-v (target value); when a cell's value
+# changes it briefly scrambles the digits, then lands on the real number.
+# First sighting of a cell is seeded silently — only genuine CHANGES animate.
+# ---------------------------------------------------------------------------
+_ROLL_INJECTED_JS = """
+(function(){
+  if (window.__rollReady) return;      // parent-realm singleton
+  window.__rollReady = true;
+  var store = {};
+  function randLike(t){ return t.replace(/[0-9]/g, function(){ return Math.floor(Math.random()*10); }); }
+  function scramble(el, target){
+    if (el.__t){ clearInterval(el.__t); }
+    var n = 6;                                     // ~6 quick frames (~270ms)
+    el.__t = setInterval(function(){
+      if (n-- <= 0){ clearInterval(el.__t); el.__t = null; el.textContent = target; return; }
+      el.textContent = randLike(target);
+    }, 45);
+  }
+  function tick(){
+    var els = document.querySelectorAll('.roll[data-k]');
+    for (var i=0;i<els.length;i++){
+      var el = els[i], k = el.getAttribute('data-k'), v = el.getAttribute('data-v');
+      if (v === null || v === '') { store[k] = v; continue; }
+      if (!(k in store)) { store[k] = v; continue; }   // first sight → no anim
+      if (store[k] !== v) { store[k] = v; scramble(el, v); }
+    }
+  }
+  var pending = false;
+  function schedule(){ if (pending) return; pending = true; setTimeout(function(){ pending=false; tick(); }, 30); }
+  new MutationObserver(schedule).observe(document.body, {childList:true, subtree:true});
+  setInterval(tick, 2000);   // safety sweep
+  tick();
+})();
+"""
+components.html(
+    "<script>(function(){var d=window.parent.document;"
+    "if(d.getElementById('rollInjector'))return;"
+    "var s=d.createElement('script');s.id='rollInjector';"
+    "s.textContent=" + json.dumps(_ROLL_INJECTED_JS) + ";"
+    "d.head.appendChild(s);})();</script>",
+    height=0,
+)
 
 TF_ALL = ["M15", "H1", "H4", "D1"]
 EXTRA = ["XAUUSD", "BTCUSD"]
@@ -215,7 +344,7 @@ if not st.session_state.get("_settings_restored"):
     st.session_state["tfs_sel"] = _csv("tfs", TF_ALL, TF_ALL)
     st.session_state["news_impacts"] = _csv("ni", NEWS_LEVELS, ["High", "Medium"])
     _sp = _qp.get("sp"); st.session_state["strength_period"] = _sp if _sp in ("24H", "1D", "1W") else "24H"
-    _rf = _qp.get("rf"); st.session_state["refresh_lbl"] = _rf if _rf in ("Off", "15s", "30s", "60s") else "30s"
+    _rf = _qp.get("rf"); st.session_state["refresh_lbl"] = _rf if _rf in ("Off", "5s", "15s", "30s", "60s") else "5s"
     _so = _qp.get("so"); st.session_state["sort_order"] = _so if _so in ("High→Low", "Low→High") else "High→Low"
     st.session_state["sort_by"] = _qp.get("sb") or "Default"
     _wl = _qp.get("wl")
@@ -232,7 +361,7 @@ def persist_settings():
         "tfs": ",".join(st.session_state.get("tfs_sel", TF_ALL)),
         "ni": ",".join(st.session_state.get("news_impacts", [])),
         "sp": st.session_state.get("strength_period", "24H"),
-        "rf": st.session_state.get("refresh_lbl", "30s"),
+        "rf": st.session_state.get("refresh_lbl", "5s"),
         "sb": st.session_state.get("sort_by", "Default"),
         "so": st.session_state.get("sort_order", "High→Low"),
         "wl": ",".join(p for p in ALL_SYMBOLS if st.session_state.get(f"w_{p}")),
@@ -240,23 +369,44 @@ def persist_settings():
 
 
 # ---------------------------------------------------------------------------
-# Sidebar (controls only — cockpit stays clean)
+# Settings live in the header ⚙ popover (settings_panel, rendered in cockpit).
+# Here we only DERIVE the current values from session_state — seeded by the URL
+# restore above and written by those widgets — so the run_every fragment
+# decorator and the render helpers have them. cockpit() re-reads them each run
+# so a change made in the popover takes effect on the next (fragment) rerun.
 # ---------------------------------------------------------------------------
-with st.sidebar:
-    st.markdown("### CONTROLS")
-    st.caption("Pairs are chosen from the **Watchlist** button up top.")
-    tfs = st.multiselect("Timeframes", TF_ALL, key="tfs_sel")
-    tfs = [t for t in TF_ALL if t in tfs] or TF_ALL
+_REFRESH_MAP = {"Off": None, "5s": 5, "15s": 15, "30s": 30, "60s": 60}
 
-    strength_period = st.selectbox("Strength window", ["24H", "1D", "1W"],
-                                   key="strength_period")
-    refresh_lbl = st.selectbox("Auto-refresh", ["Off", "15s", "30s", "60s"],
-                               key="refresh_lbl")
-    news_impacts = st.multiselect("News impact", NEWS_LEVELS, key="news_impacts")
-    if st.button("Force refresh", width="stretch"):
-        st.cache_data.clear(); st.rerun()
 
-_REFRESH = {"Off": None, "15s": 15, "30s": 30, "60s": 60}[refresh_lbl]
+def _read_settings():
+    """Refresh the module-level setting globals from session_state."""
+    global tfs, strength_period, news_impacts, refresh_lbl
+    tfs = [t for t in TF_ALL if t in st.session_state.get("tfs_sel", TF_ALL)] or TF_ALL
+    strength_period = st.session_state.get("strength_period", "24H")
+    news_impacts = st.session_state.get("news_impacts", ["High", "Medium"])
+    refresh_lbl = st.session_state.get("refresh_lbl", "5s")
+
+
+_read_settings()
+_REFRESH = _REFRESH_MAP[refresh_lbl]
+_REFRESH_LABEL = refresh_lbl   # what run_every was built with (this full run)
+
+
+def settings_panel():
+    """All customizable settings — rendered inside the header ⚙ popover."""
+    st.markdown('<div class="wtitle" style="margin-top:0">⚙ Settings</div>',
+                unsafe_allow_html=True)
+    st.multiselect("Timeframes", TF_ALL, key="tfs_sel",
+                   help="Which timeframes to show across the Pair Monitor & heatmap.")
+    st.selectbox("Strength window", ["24H", "1D", "1W"], key="strength_period",
+                 help="Lookback for the currency-strength bar.")
+    st.selectbox("Auto-refresh", ["Off", "5s", "15s", "30s", "60s"], key="refresh_lbl",
+                 help="How often the dashboard pulls fresh prices.")
+    st.multiselect("News impact", NEWS_LEVELS, key="news_impacts",
+                   help="Impact levels to show in the Economic Calendar.")
+    if st.button("Force refresh now", width="stretch"):
+        st.cache_data.clear()
+        st.rerun()
 
 
 def _fmt_price(p):
@@ -276,10 +426,10 @@ def _vol_color(pct):
         return MUT
     if pct >= 1.0:
         return DOWN          # very volatile
-    if pct >= 0.7:
-        return AMBER         # elevated
-    if pct >= 0.4:
-        return INK           # normal
+    if pct >= 0.618:
+        return AMBER         # elevated (Fib 0.618)
+    if pct >= 0.382:
+        return INK           # normal (Fib 0.382)
     return MUT               # quiet
 
 
@@ -294,6 +444,19 @@ def _vol_fmt(pair, vol):
     if pair == "XAUUSD":
         return f"{a:.0f}pt"
     return f'{vol["pips"]:.0f}p'
+
+
+def _activity_dot(vol):
+    """Colour a live-activity dot by today's range vs the pair's average range
+    (ATR): bright = running hot right now, dim = quiet so far."""
+    r = vol.get("day_vs_atr")
+    if r is None:
+        return MUT
+    if r >= 1.0:
+        return UP            # today already ≥ a full average day → hot
+    if r >= 0.618:
+        return AMBER         # active (Fib 0.618)
+    return "#3a4150"         # quiet so far (dim)
 
 
 def _wl_set_only(group):
@@ -353,9 +516,13 @@ def order_pairs(pairs, quotes, trends, atrs, sort_by, desc):
             v = atrs[p]["pct"]
         else:  # a timeframe → trend score
             v = trends[p].get(sort_by, {}).get("score")
-        return float("-inf") if v is None else v
+        return v
 
-    return sorted(pairs, key=metric, reverse=desc)
+    vals = {p: metric(p) for p in pairs}
+    have = sorted((p for p in pairs if vals[p] is not None),
+                  key=lambda p: vals[p], reverse=desc)
+    missing = [p for p in pairs if vals[p] is None]
+    return have + missing   # no-data rows always sink to the bottom, either way
 
 
 def monitor_table(pairs, quotes, trends, atrs):
@@ -367,13 +534,15 @@ def monitor_table(pairs, quotes, trends, atrs):
         cc = UP if (chg or 0) >= 0 else DOWN
         chg_txt = "—" if chg is None else f"{chg:+.2f}%"
         vcol = _vol_color(vol["pct"])
+        acol = _activity_dot(vol)
         cells = ""
         for t in tfs:
             a = tr[t]["arrow"]
             cells += f'<td style="color:{ARROW_COL.get(a,MUT)};font-size:15px">{a}</td>'
-        body += (f'<tr><td>{p}</td>'
+        body += (f'<tr><td>{p} <span style="color:{acol};font-size:9px" '
+                 f'title="live activity: today\'s range vs average">&#9679;</span></td>'
                  f'<td style="color:{cc}">{chg_txt}</td>'
-                 f'<td style="color:{vcol}" title="Avg daily range (ATR-14)">'
+                 f'<td style="color:{vcol}" title="Avg daily range (ATR-13)">'
                  f'{_vol_fmt(p, vol)}</td>{cells}</tr>')
     return (f'<table class="term"><thead><tr><th>Pair</th>'
             f'<th>Δ Day</th><th>Vol/D</th>{head}</tr></thead>'
@@ -424,13 +593,20 @@ def news_feed(cal, now):
                 f'auto-retries on the next refresh</span></div>')
     stale = cal.attrs.get("stale", False)
     total = len(cal)
-    cal = cal[cal["impact"].isin(news_impacts)].copy()
     # keep from 2h ago onward so "just happened" stays visible
-    cal = cal[cal["time"] >= now - pd.Timedelta(hours=2)]
+    upc = cal[cal["time"] >= now - pd.Timedelta(hours=2)]
+    sel = upc[upc["impact"].isin(news_impacts)]
+    # keep the panel FULL: show the selected-impact events, and if fewer than 10,
+    # top up with the earliest remaining events so it never looks empty.
+    LIMIT = 10
+    if len(sel) >= LIMIT:
+        cal = sel.head(LIMIT)
+    else:
+        fill = upc[~upc["impact"].isin(news_impacts)].head(LIMIT - len(sel))
+        cal = pd.concat([sel, fill]).sort_values("time")
     if cal.empty:
         return (f'<div style="color:{MUT};font:600 12px/1.5 monospace;padding:.4rem">'
-                f'No {"/".join(news_impacts)} events left this week '
-                f'({total} total loaded).<br>Add "Low" in the sidebar to see more.</div>')
+                f'No events upcoming ({total} total loaded).</div>')
     upcoming = cal[cal["time"] >= now]
     next_idx = upcoming.index[0] if not upcoming.empty else None
     banner = ""
@@ -440,7 +616,8 @@ def news_feed(cal, now):
     rows = ""
     for i, ev in cal.iterrows():
         dot = IMPACT_DOT.get(ev["impact"], MUT)
-        cd = _countdown(ev["time"], now)
+        # this-week events → live hrs/mins countdown; next-week → "next week"
+        cd = "next week" if ev.get("next_week") else _countdown(ev["time"], now)
         nxt = " next" if i == next_idx else ""
         link = ("https://www.google.com/search?tbm=nws&q=" +
                 quote_plus(f'{ev["currency"]} {ev["title"]}'))
@@ -485,23 +662,139 @@ def strength_fig(s):
     return fig
 
 
-def heatmap_fig(pairs, trends):
-    z = [[trends[p][t]["score"] for t in tfs] for p in pairs]
-    txt = [[trends[p][t]["arrow"] for t in tfs] for p in pairs]
-    fig = go.Figure(go.Heatmap(
-        z=z, x=tfs, y=pairs, text=txt, texttemplate="%{text}",
-        textfont={"size": 15, "family": "JetBrains Mono"},
-        zmid=0, zmin=-2, zmax=2, showscale=False, xgap=4, ygap=4,
-        colorscale=[[0, DOWN], [0.25, DOWN_DIM], [0.5, "#202632"],
-                    [0.75, UP_DIM], [1, UP]]))
-    fig.update_layout(
-        height=max(250, 34 * len(pairs) + 40), template="plotly_dark", dragmode=False,
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        margin=dict(l=6, r=6, t=22, b=6),
-        yaxis=dict(autorange="reversed", fixedrange=True),
-        xaxis=dict(fixedrange=True, side="top"),
-        font=dict(family="JetBrains Mono", color=MUT, size=11))
-    return fig
+def _mean_heat(hmap):
+    """Average heat across a pair's timeframes (skips missing cells)."""
+    vs = [v for v in hmap.values() if v is not None]
+    return sum(vs) / len(vs) if vs else 0.0
+
+
+# Thermal ramp stops (heat 0→2 mapped to 0→1): quiet-dark → cool → teal(normal)
+# → amber → hot orange-red. Same colours the old Plotly heatmap used.
+_HEAT_STOPS = [(0.00, (0x16, 0x1b, 0x24)), (0.30, (0x1f, 0x33, 0x46)),
+               (0.50, (0x2f, 0x6f, 0x6a)), (0.72, (0xc1, 0x85, 0x2b)),
+               (1.00, (0xff, 0x5a, 0x36))]
+
+
+def _heat_color(v):
+    """Interpolate a heat ratio (~0..2, 1.0 = normal) to a thermal hex colour."""
+    if v is None:
+        return "#12161d"                      # no data
+    t = max(0.0, min(1.0, v / 2.0))
+    for (p0, c0), (p1, c1) in zip(_HEAT_STOPS, _HEAT_STOPS[1:]):
+        if t <= p1:
+            f = 0.0 if p1 == p0 else (t - p0) / (p1 - p0)
+            r, g, b = (round(a + (b_ - a) * f) for a, b_ in zip(c0, c1))
+            return f"#{r:02x}{g:02x}{b:02x}"
+    return "#ff5a36"
+
+
+def vol_heatmap_html(pairs, heats):
+    """Volatility heatmap as an HTML table (pairs × timeframe), each cell coloured
+    by how hot it is running right now (recent range ÷ ATR, 1.0 = an average bar).
+
+    Rendered as HTML — not Plotly — on purpose: the DOM diffs cell colours in
+    place on each 30s refresh, so nothing repaints/strobes the way a Plotly
+    heatmap canvas does. Deliberately a thermal ramp, NOT green/red (those mean
+    trend up/down elsewhere)."""
+    head = '<tr><th></th>' + ''.join(f'<th>{t}</th>' for t in tfs) + '</tr>'
+    rows = []
+    for p in pairs:
+        cells = [f'<td class="pl">{p}</td>']
+        for t in tfs:
+            v = heats[p].get(t)
+            lbl = '' if v is None else f'{v:.1f}'
+            # class "roll" + data-k (stable id) + data-v (target) let the injected
+            # JS scramble ONLY the cells whose value actually changed on refresh.
+            cells.append(f'<td class="roll" data-k="{p}|{t}" data-v="{lbl}" '
+                         f'style="background:{_heat_color(v)}">{lbl}</td>')
+        rows.append('<tr>' + ''.join(cells) + '</tr>')
+    return (f'<table class="heat"><thead>{head}</thead>'
+            f'<tbody>{"".join(rows)}</tbody></table>')
+
+
+def _corr_color(c):
+    """Diverging colour for a correlation (-1..1). Warm amber = move together,
+    cool blue = move opposite, dark neutral near 0. Deliberately NOT green/red
+    (those mean trend up/down); negative correlation isn't 'bad'."""
+    if c is None or pd.isna(c):
+        return "#12161d"
+    c = max(-1.0, min(1.0, float(c)))
+    dark = (0x1c, 0x22, 0x2e)
+    end = (0xe8, 0x87, 0x3a) if c >= 0 else (0x3d, 0x7d, 0xd6)   # warm / cool
+    t = abs(c)
+    r, g, b = (round(dark[i] + (end[i] - dark[i]) * t) for i in range(3))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+# Currency priority for grouping the matrix — USD first, then the rest of the
+# majors (data_feed.MAJORS already starts USD, EUR, GBP, …).
+_CCY_ORDER = {c: i for i, c in enumerate(d.MAJORS)}
+
+
+def _ccy_rank(c):
+    return _CCY_ORDER.get(c, len(d.MAJORS))   # non-majors (XAU/BTC) sort last
+
+
+def group_pairs_by_currency(pairs):
+    """Stack pairs sharing a currency together so correlation blocks are obvious:
+    grouped by each pair's highest-priority currency (USD first, then EUR, …),
+    and within a group the base-side pairs (USDxxx) are kept apart from the
+    quote-side ones (xxxUSD) — which is exactly where correlation flips sign."""
+    def key(p):
+        a, b = p[:3], p[3:]
+        ra, rb = _ccy_rank(a), _ccy_rank(b)
+        if ra <= rb:                 # primary currency is the base
+            return (ra, 0, rb, p)
+        return (rb, 1, ra, p)        # primary currency is the quote
+    return sorted(pairs, key=key)
+
+
+def corr_matrix_html(corr):
+    """Correlation heatmap as an HTML table (pairs × pairs). Diagonal is muted.
+    Pairs are grouped by shared currency; capped at CORR_MAX (caller flags it)."""
+    pairs = group_pairs_by_currency(list(corr.columns))[:CORR_MAX]
+    head = '<tr><th></th>' + ''.join(f'<th>{p}</th>' for p in pairs) + '</tr>'
+    rows = []
+    for r in pairs:
+        cells = [f'<td class="pl">{r}</td>']
+        for c in pairs:
+            v = corr.loc[r, c]
+            if r == c:
+                cells.append('<td style="background:#161b24;color:#39424f">·</td>')
+            else:
+                lbl = '' if pd.isna(v) else f'{v:.1f}'
+                cells.append(f'<td style="background:{_corr_color(v)}">{lbl}</td>')
+        rows.append('<tr>' + ''.join(cells) + '</tr>')
+    return (f'<table class="heat corr"><thead>{head}</thead>'
+            f'<tbody>{"".join(rows)}</tbody></table>')
+
+
+def sessions_strip(now):
+    """Horizontal FX session clock: which centres are live, the London–NY
+    overlap (peak liquidity), and a countdown to the next session change.
+    Pure time math — no data feed, on-thesis with the volatility-first view."""
+    s = sess.market_sessions(now)
+    pills = "".join(
+        f'<span class="sess {"on" if is_open else "off"}">{name}</span>'
+        for name, is_open in s["sessions"])
+
+    if s["weekend"]:
+        note = f'<span class="sess-note" style="color:{MUT}">✖ FX market closed — weekend</span>'
+    elif s["overlap"]:
+        note = f'<span class="sess-note" style="color:{AMBER}">⚡ London–New York overlap · peak liquidity</span>'
+    elif s["any_open"]:
+        live = " + ".join(n for n, o in s["sessions"] if o)
+        note = f'<span class="sess-note" style="color:{UP}">● {live} open</span>'
+    else:
+        note = f'<span class="sess-note" style="color:{MUT}">○ between sessions · thin liquidity</span>'
+
+    nxt = s["next"]
+    nxt_html = ""
+    if nxt:
+        verb = "opens" if nxt["kind"] == "open" else "closes"
+        nxt_html = (f'<span class="sess-next">next: {nxt["name"]} {verb} in '
+                    f'{sess.fmt_countdown(nxt["seconds"])}</span>')
+    return f'<div class="sessbar">{pills}{note}{nxt_html}</div>'
 
 
 def kpi_strip(pairs, quotes, atrs, strength, trends, cal, now):
@@ -521,9 +814,9 @@ def kpi_strip(pairs, quotes, atrs, strength, trends, cal, now):
     acts = [atrs[p]["day_vs_atr"] for p in pairs
             if atrs[p].get("day_vs_atr") is not None]
     market_act = (sum(acts) / len(acts)) if acts else 0.0
-    if market_act >= 0.80:
+    if market_act >= 0.786:
         mkt_phrase, mkt_col = "High volatility — active market", UP
-    elif market_act >= 0.45:
+    elif market_act >= 0.382:
         mkt_phrase, mkt_col = "Normal activity — average day", AMBER
     else:
         mkt_phrase, mkt_col = "Low volatility — quiet market", DOWN
@@ -596,11 +889,13 @@ def kpi_strip(pairs, quotes, atrs, strength, trends, cal, now):
 # ---------------------------------------------------------------------------
 @st.fragment(run_every=_REFRESH)
 def cockpit():
+    # Pick up any settings changed in the ⚙ popover on the previous rerun.
+    _read_settings()
     now = d.now_utc()
     rlabel = "auto-refresh off" if _REFRESH is None else f"every {refresh_lbl}"
 
-    # top bar: logo/live | Watchlist toggle button | LAST UPDATED time
-    hL, hMid, hR = st.columns([5, 2, 5], gap="small", vertical_alignment="center")
+    # top bar: logo/live | GitHub + ⚙ settings + Watchlist | LAST UPDATED time
+    hL, hMid, hR = st.columns([5, 4, 5], gap="small", vertical_alignment="center")
     with hL:
         st.markdown(
             f'<div class="hdr"><span class="logo">FRE<b>O</b>X</span>'
@@ -608,13 +903,23 @@ def cockpit():
             f'<span class="live"><span class="dot"></span>{rlabel.upper()}</span></div>',
             unsafe_allow_html=True)
     with hMid:
-        with st.popover("☰ Watchlist", width="stretch"):
-            watch = watchlist_picker()
+        ghcol, gcol, wcol = st.columns([1, 1, 3], gap="small")
+        with ghcol:
+            st.markdown(GITHUB_HTML, unsafe_allow_html=True)
+        with gcol:
+            with st.popover("⚙", width="stretch"):
+                settings_panel()
+        with wcol:
+            with st.popover("☰ Watchlist", width="stretch"):
+                watch = watchlist_picker()
     with hR:
         st.markdown(
             f'<div class="clock" style="text-align:right">'
             f'LAST UPDATED&nbsp; {now:%Y-%m-%d %H:%M:%S} UTC</div>',
             unsafe_allow_html=True)
+
+    # FX session clock — when the action is (independent of the watchlist)
+    st.markdown(sessions_strip(now), unsafe_allow_html=True)
 
     if not watch:
         st.warning("No instruments selected — open **☰ Watchlist** and pick some.")
@@ -623,6 +928,7 @@ def cockpit():
     data = gather_pairs(tuple(watch), tuple(tfs))
     quotes = {p: data[p]["quote"] for p in watch}
     trends = {p: data[p]["trend"] for p in watch}
+    heats = {p: data[p]["heat"] for p in watch}
     atrs = {p: data[p]["atr"] for p in watch}
     strength = c_strength(strength_period)
     cal = c_calendar()
@@ -642,11 +948,11 @@ def cockpit():
                 f'<div class="wtitle">Pair Monitor</div>'
                 f'<div style="color:{MUT};font:500 10px/1.4 monospace;text-align:center;'
                 f'margin-bottom:.4rem">'
-                f'Vol/D = avg daily range (ATR-14): pips · pt gold · $ btc · '
-                f'<span style="color:{DOWN}">■</span> wild '
-                f'<span style="color:{AMBER}">■</span> elevated '
-                f'<span style="color:{INK}">■</span> normal '
-                f'<span style="color:{MUT}">■</span> quiet</div>',
+                f'Vol/D = avg daily range (ATR-13): pips · pt gold · $ btc &nbsp;|&nbsp; '
+                f'<span style="color:{UP}">&#9679;</span> = live activity: '
+                f'<span style="color:{UP}">hot</span> · '
+                f'<span style="color:{AMBER}">active</span> · '
+                f'<span style="color:#3a4150">quiet</span> (today\'s range vs avg)</div>',
                 unsafe_allow_html=True)
             sc1, sc2 = st.columns([3, 2], gap="small")
             _sopts = ["Default", "Day %", "Vol"] + tfs
@@ -658,24 +964,26 @@ def cockpit():
             ordered = order_pairs(watch, quotes, trends, atrs, sort_by, sort_desc)
             st.markdown(monitor_table(ordered, quotes, trends, atrs),
                         unsafe_allow_html=True)
-        # ── Top Setups: aligned-trend shortlist derived from the heatmap ──
+        # ── Top Setups: aligned-trend shortlist (multi-TF trend agreement) ──
         with st.container(border=True):
             st.markdown('<div class="wtitle">Top Setups · aligned trends</div>' +
                         top_setups_html(watch, trends), unsafe_allow_html=True)
 
     with mid:
-        # ── Trend Heatmap: title + bias note + grid, all one box ──
+        # ── Volatility Heatmap: title + hottest-pair note + grid, all one box ──
         with st.container(border=True):
-            strong, weak = strength.index[0], strength.index[-1]
+            hot = max(ordered, key=lambda p: _mean_heat(heats[p])) if ordered else None
+            hv = _mean_heat(heats[hot]) if hot else 0.0
+            hcol = UP if hv >= 1.0 else (AMBER if hv >= 0.618 else MUT)
             st.markdown(
-                f'<div class="wtitle">Trend Heatmap · pair × TF</div>'
+                f'<div class="wtitle">Volatility Heatmap · pair × TF</div>'
                 f'<div style="color:{INK};font:600 12px/1.5 monospace;text-align:center">'
-                f'▸ Cleanest bias: <span style="color:{UP}">LONG {strong}</span> / '
-                f'<span style="color:{DOWN}">SHORT {weak}</span><br>'
-                f'<span style="color:{MUT}">strongest vs weakest currency — '
-                f'look for the pair that is {strong}{weak} or {weak}{strong}</span></div>',
+                f'▸ Hottest now: <span style="color:{hcol}">{hot} {hv:.1f}×</span> '
+                f'<span style="color:{MUT}">vs its normal range</span><br>'
+                f'<span style="color:{MUT}">bright = running hot right now · '
+                f'dark = quiet · 1.0 = an average bar</span></div>'
+                + vol_heatmap_html(ordered, heats),
                 unsafe_allow_html=True)
-            st.plotly_chart(heatmap_fig(ordered, trends), width="stretch", config=_STATIC)
 
     with right:
         # ── Economic Calendar: one box ──
@@ -686,7 +994,25 @@ def cockpit():
         with st.container(border=True):
             st.markdown(f'<div class="wtitle">Currency Strength · {strength_period}</div>',
                         unsafe_allow_html=True)
-            st.plotly_chart(strength_fig(strength), width="stretch", config=_STATIC)
+            st.plotly_chart(strength_fig(strength), width="stretch",
+                            config=_STATIC, key="strength_bar")
+
+    # ── Correlation matrix (full width, below the grid) ──
+    corr = c_correlation(tuple(watch))
+    if corr is not None and len(corr.columns) >= 2:
+        with st.container(border=True):
+            n = len(corr.columns)
+            more = (f' · showing first {CORR_MAX} of {n} — narrow your watchlist '
+                    f'for the rest') if n > CORR_MAX else ''
+            st.markdown(
+                f'<div class="wtitle">Correlation · {CORR_WINDOW}-day returns{more}</div>'
+                f'<div style="color:{MUT};font:500 10px/1.4 monospace;text-align:center;'
+                f'margin-bottom:.35rem">'
+                f'<span style="color:#e8873a">amber = move together</span> · '
+                f'<span style="color:#3d7dd6">blue = move opposite</span> · '
+                f'stacking correlated pairs = the same bet twice (double risk)</div>'
+                + corr_matrix_html(corr),
+                unsafe_allow_html=True)
 
     # data-source disclaimer (accuracy honesty)
     st.markdown(
@@ -699,6 +1025,14 @@ def cockpit():
 
     # persist all current settings to the URL so a page refresh restores them
     persist_settings()
+
+    # Re-apply run_every when the refresh RATE changed in the ⚙ popover. This is
+    # done LAST — after every widget (incl. the Watchlist checkboxes) has already
+    # rendered this run — so the forced app rerun can't garbage-collect unrendered
+    # widget state (which would silently clear the watchlist). run_every is fixed
+    # on the fragment decorator at module-run time, so a full app rerun is needed.
+    if refresh_lbl != _REFRESH_LABEL:
+        st.rerun(scope="app")
 
 
 cockpit()

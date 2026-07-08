@@ -16,27 +16,36 @@ def ema(series: pd.Series, span: int) -> pd.Series:
     return series.ewm(span=span, adjust=False).mean()
 
 
-def trend_of(df: pd.DataFrame, fast: int = 20, slow: int = 50) -> dict:
-    """Classify trend from an OHLC frame.
+def trend_of(df: pd.DataFrame, fast: int = 21, mid: int = 55, slow: int = 89) -> dict:
+    """Classify trend from an OHLC frame using a THREE-EMA stack.
 
-    Returns {score: -2..+2, label, arrow}. Uses price vs EMA stack.
+    Lengths are Fibonacci numbers (21 / 55 / 89) — a Fibonacci EMA ribbon.
+    Returns {score: -2..+2, label, arrow}.
+      +2 ▲▲ Strong Up  = full stack aligned: price > EMA21 > EMA55 > EMA89
+      +1 ▲  Up         = price > EMA21 > EMA55 (top two aligned, slow not yet)
+      -1 ▼  Down       = price < EMA21 < EMA55
+      -2 ▼▼ Strong Down= price < EMA21 < EMA55 < EMA89
+       0 ·  Flat       = mixed / no clean alignment
+    The extra (89) EMA is the added confirmation over the old 2-EMA check —
+    a "strong" arrow now means three moving averages agree, not two.
     """
     if df.empty or len(df) < slow:
         return {"score": 0, "label": "n/a", "arrow": "·"}
     close = df["close"]
     ef = ema(close, fast).iloc[-1]
+    em = ema(close, mid).iloc[-1]
     es = ema(close, slow).iloc[-1]
     px = float(close.iloc[-1])
 
-    up = px > ef
-    stack_up = ef > es
-    if up and stack_up:
+    if px > ef > em > es:
         return {"score": 2, "label": "Strong Up", "arrow": "▲▲"}
-    if up and not stack_up:
+    if px > ef and ef > em:
         return {"score": 1, "label": "Up", "arrow": "▲"}
-    if not up and not stack_up:
+    if px < ef < em < es:
         return {"score": -2, "label": "Strong Down", "arrow": "▼▼"}
-    return {"score": -1, "label": "Down", "arrow": "▼"}
+    if px < ef and ef < em:
+        return {"score": -1, "label": "Down", "arrow": "▼"}
+    return {"score": 0, "label": "Flat", "arrow": "·"}
 
 
 def pip_size(pair: str) -> float:
@@ -49,7 +58,7 @@ def pip_size(pair: str) -> float:
     return 0.01 if pair[3:] == "JPY" else 0.0001
 
 
-def atr_volatility(pair: str, tf: str = "D1", n: int = 14) -> dict:
+def atr_volatility(pair: str, tf: str = "D1", n: int = 13) -> dict:
     """Average True Range volatility for a pair/instrument.
 
     Returns {atr, pips, pct, tf, day_range, day_vs_atr}. `atr` = raw price-unit
@@ -84,6 +93,32 @@ def multi_tf_trend(pair: str, tfs=("M15", "H1", "H4", "D1")) -> dict:
     for tf in tfs:
         out[tf] = trend_of(get_ohlc_tf(pair, tf))
     return out
+
+
+def tf_heat(pair: str, tf: str, n: int = 13, recent: int = 3) -> float | None:
+    """How 'hot' a timeframe is running right NOW, self-normalised.
+
+    = mean true range of the last `recent` bars ÷ ATR(n) baseline.
+    ~1.0 = an average bar, >1 heating up, <1 quiet. Because each cell is
+    divided by its own ATR, every timeframe (and every pair) lands on the same
+    scale — so an M15 cell and a D1 cell are directly comparable. `n`=13 and
+    `recent`=3 are Fibonacci, matching the rest of the indicator settings.
+    """
+    df = get_ohlc_tf(pair, tf)
+    if df.empty or len(df) < n + 1:
+        return None
+    h, l, c = df["high"], df["low"], df["close"]
+    pc = c.shift(1)
+    tr = pd.concat([h - l, (h - pc).abs(), (l - pc).abs()], axis=1).max(axis=1)
+    atr = float(tr.ewm(alpha=1 / n, adjust=False).mean().iloc[-1])
+    if not atr:
+        return None
+    return float(tr.iloc[-recent:].mean()) / atr
+
+
+def multi_tf_heat(pair: str, tfs=("M15", "H1", "H4", "D1")) -> dict:
+    """Heat ratio per timeframe for one pair. Returns {tf: ratio | None}."""
+    return {tf: tf_heat(pair, tf) for tf in tfs}
 
 
 # period → (yahoo range, yahoo interval, bars-back defining the window).
