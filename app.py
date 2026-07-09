@@ -97,7 +97,7 @@ AMBER   = "#ffb020"
 INK     = "#d7dde8"
 MUT     = "#6b7688"
 
-VERSION = "0.3"   # beta — bump on each release
+VERSION = "0.4"   # beta — bump on each release
 GITHUB_URL = "https://github.com/Spoofkapoof/freox"
 GITHUB_HTML = (
     f'<a class="ghlink" href="{GITHUB_URL}" target="_blank" rel="noopener"'
@@ -242,6 +242,45 @@ st.markdown(f"""<style>
            text-decoration:none;transition:border-color .12s,color .12s;}}
   .ghlink:hover{{color:{UP};border-color:{UP};}}
   .ghlink svg{{width:18px;height:18px;display:block;}}
+  /* keep the header GitHub / ⚙ / Watchlist row in ONE line — don't let it
+     stack vertically on narrow (phone) screens like Streamlit columns do. */
+  .st-key-hdrbtns [data-testid="stHorizontalBlock"]{{flex-wrap:nowrap!important;gap:.4rem!important;}}
+  .st-key-hdrbtns [data-testid="stColumn"]{{min-width:0!important;flex:1 1 auto!important;}}
+
+  /* ── phone single scroll pane (?view=phone): the windows scroll under the
+     locked top; the full-height flex wiring is injected only in phone view ── */
+  .st-key-pscroll{{overflow-y:auto;-webkit-overflow-scrolling:touch;}}
+  .st-key-pscroll::-webkit-scrollbar{{width:5px;}}
+  .st-key-pscroll::-webkit-scrollbar-thumb{{background:{BORDER};border-radius:3px;}}
+
+  /* ── FX session timeline (phone locked-top): bars on a 0–24 UTC axis ── */
+  .stl{{background:{PANEL};border:1px solid {BORDER};border-radius:8px;
+        padding:.4rem .6rem .45rem;margin-bottom:.4rem;
+        font:600 10px/1 'JetBrains Mono',monospace;}}
+  /* label(78) == axis margin == now-line base → everything lines up exactly */
+  .stl-axis{{position:relative;height:11px;margin-left:78px;color:{MUT};font-size:9px;}}
+  .stl-axis span{{position:absolute;transform:translateX(-50%);}}
+  .stl-body{{position:relative;}}
+  .srow{{display:flex;align-items:center;gap:0;height:15px;margin:2.5px 0;}}
+  .slbl{{flex:0 0 78px;color:{INK};font-size:9px;white-space:nowrap;overflow:hidden;
+         letter-spacing:.01em;padding-right:4px;}}
+  .strack{{position:relative;flex:1;height:11px;background:#0a0d12;
+           border:1px solid #12171f;border-radius:3px;}}
+  .sbar{{position:absolute;top:0;bottom:0;border-radius:2px;}}
+  .sbar.on{{background:{UP};box-shadow:0 0 6px rgba(0,226,138,.45);}}
+  .sbar.off{{background:#2a3547;}}
+  /* single continuous 'now' line spanning ONLY the session rows */
+  .stl-nowline{{position:absolute;top:0;bottom:0;width:2px;background:{AMBER};
+         box-shadow:0 0 5px {AMBER};z-index:4;pointer-events:none;border-radius:1px;}}
+  .stl-status{{margin:0 0 .4rem;font-size:11px;letter-spacing:.02em;font-weight:700;}}
+  /* labels inside the merged top box (news/movers/market) — uppercase like before */
+  .stl .lab{{color:{MUT};font:600 9px/1.3 'JetBrains Mono',monospace;
+             letter-spacing:.1em;text-transform:uppercase;}}
+  /* Market Activity — one compact line */
+  .stl-mkt{{margin-top:.4rem;padding-top:.35rem;border-top:1px solid {BORDER};
+            font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}}
+  /* News + Movers sub-section, divided from Market Activity */
+  .stl-nm{{margin-top:.4rem;padding-top:.4rem;border-top:1px solid {BORDER};}}
   /* Centre the Watchlist dropdown on screen. The button is already page-centred,
      so centring the panel on the viewport aligns it under the button — no width
      math, no per-pixel guessing. Full-override of floating-ui's positioning. */
@@ -258,6 +297,20 @@ st.markdown(f"""<style>
   div[data-testid="stStatusWidget"]{{display:none!important;}}
   div[data-testid="stSpinner"]{{display:none!important;}}
   .stApp [data-testid="stAppViewBlockContainer"]{{opacity:1!important;}}
+
+  /* ── mobile / narrow screens (phone "app" via Add-to-Home-Screen) ── */
+  @media (max-width: 640px){{
+    .block-container{{padding:.4rem .5rem 0!important;}}
+    .kpis{{grid-template-columns:1fr!important;gap:.4rem;}}   /* stack KPI tiles */
+    .kpi .val{{font-size:18px;}}
+    .logo{{font-size:16px;letter-spacing:.16em;}}
+    .clock{{font-size:11px;}}
+    .sessbar{{font-size:10px;}}
+    /* wide tables scroll sideways inside their box instead of squishing */
+    .scrollx{{overflow-x:auto;-webkit-overflow-scrolling:touch;}}
+    table.term{{font-size:12px;}} table.term th,table.term td{{padding:.4rem .35rem;}}
+    table.corr{{min-width:520px;}}       /* force horizontal scroll on phone */
+  }}
 </style>""", unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
@@ -325,6 +378,19 @@ IMPACT_DOT = {"High": DOWN, "Medium": AMBER, "Low": "#4a90d9", "Holiday": MUT}
 ARROW_COL = {"▲▲": UP, "▲": UP_DIM, "▼": DOWN_DIM, "▼▼": DOWN, "·": MUT}
 NEWS_LEVELS = ["High", "Medium", "Low", "Holiday"]
 
+# Toggleable windows (⚙ Settings → Panels). Order = display order in settings.
+PANELS = [
+    ("sessions",    "Session clock"),
+    ("kpi",         "KPI strip"),
+    ("monitor",     "Pair Monitor"),
+    ("setups",      "Top Setups"),
+    ("heatmap",     "Volatility Heatmap"),
+    ("calendar",    "Economic Calendar"),
+    ("strength",    "Currency Strength"),
+    ("correlation", "Correlation Matrix"),
+]
+PANEL_KEYS = [k for k, _ in PANELS]
+
 # ---------------------------------------------------------------------------
 # Restore every setting from the URL query params on a fresh page load, so
 # filters/watchlist survive a HARD browser refresh (session_state alone resets
@@ -352,6 +418,10 @@ if not st.session_state.get("_settings_restored"):
                 else set(DEFAULT_WATCH))
     for _p in ALL_SYMBOLS:
         st.session_state[f"w_{_p}"] = _p in _watched
+    _pn = _qp.get("pn")                       # panels: store the HIDDEN ones
+    _hidden = set(_pn.split(",")) if _pn else set()
+    for _k in PANEL_KEYS:
+        st.session_state[f"pan_{_k}"] = _k not in _hidden
     st.session_state["_settings_restored"] = True
 
 
@@ -365,6 +435,7 @@ def persist_settings():
         "sb": st.session_state.get("sort_by", "Default"),
         "so": st.session_state.get("sort_order", "High→Low"),
         "wl": ",".join(p for p in ALL_SYMBOLS if st.session_state.get(f"w_{p}")),
+        "pn": ",".join(k for k in PANEL_KEYS if not st.session_state.get(f"pan_{k}", True)),
     })
 
 
@@ -404,6 +475,13 @@ def settings_panel():
                  help="How often the dashboard pulls fresh prices.")
     st.multiselect("News impact", NEWS_LEVELS, key="news_impacts",
                    help="Impact levels to show in the Economic Calendar.")
+
+    st.markdown('<div class="wtitle" style="margin:.5rem 0 .1rem">Panels — show / hide</div>',
+                unsafe_allow_html=True)
+    pcols = st.columns(2)
+    for i, (k, label) in enumerate(PANELS):
+        pcols[i % 2].checkbox(label, key=f"pan_{k}")
+
     if st.button("Force refresh now", width="stretch"):
         st.cache_data.clear()
         st.rerun()
@@ -544,9 +622,9 @@ def monitor_table(pairs, quotes, trends, atrs):
                  f'<td style="color:{cc}">{chg_txt}</td>'
                  f'<td style="color:{vcol}" title="Avg daily range (ATR-13)">'
                  f'{_vol_fmt(p, vol)}</td>{cells}</tr>')
-    return (f'<table class="term"><thead><tr><th>Pair</th>'
+    return (f'<div class="scrollx"><table class="term"><thead><tr><th>Pair</th>'
             f'<th>Δ Day</th><th>Vol/D</th>{head}</tr></thead>'
-            f'<tbody>{body}</tbody></table>')
+            f'<tbody>{body}</tbody></table></div>')
 
 
 def top_setups_html(pairs, trends):
@@ -765,8 +843,8 @@ def corr_matrix_html(corr):
                 lbl = '' if pd.isna(v) else f'{v:.1f}'
                 cells.append(f'<td style="background:{_corr_color(v)}">{lbl}</td>')
         rows.append('<tr>' + ''.join(cells) + '</tr>')
-    return (f'<table class="heat corr"><thead>{head}</thead>'
-            f'<tbody>{"".join(rows)}</tbody></table>')
+    return (f'<div class="scrollx"><table class="heat corr"><thead>{head}</thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div>')
 
 
 def sessions_strip(now):
@@ -797,7 +875,112 @@ def sessions_strip(now):
     return f'<div class="sessbar">{pills}{note}{nxt_html}</div>'
 
 
-def kpi_strip(pairs, quotes, atrs, strength, trends, cal, now):
+def _market_activity(pairs, atrs):
+    """(value, phrase, colour) for the Market Activity gauge — shared by phone."""
+    acts = [atrs[p]["day_vs_atr"] for p in pairs if atrs[p].get("day_vs_atr") is not None]
+    ma = (sum(acts) / len(acts)) if acts else 0.0
+    if ma >= 0.786:
+        return ma, "High volatility — active market", UP
+    if ma >= 0.382:
+        return ma, "Normal activity — average day", AMBER
+    return ma, "Low volatility — quiet market", DOWN
+
+
+def phone_top_html(now, pairs, atrs, cal, quotes, strength):
+    """The ENTIRE locked top as ONE compact box: session timeline + a one-line
+    Market Activity + Upcoming News (left) with Top Movers (right)."""
+    # ── session timeline ──
+    bars = sess.session_bars(now)
+    now_frac = (now.hour + now.minute / 60) / 24
+    s = sess.market_sessions(now)
+    rows = ""
+    for b in bars:
+        segs = "".join(
+            f'<i class="sbar {"on" if b["open"] else "off"}" '
+            f'style="left:{st_h/24*100:.2f}%;width:{(en_h-st_h)/24*100:.2f}%"></i>'
+            for st_h, en_h in b["segs"])
+        dot = UP if b["open"] else MUT
+        rows += (f'<div class="srow"><span class="slbl"><b style="color:{dot}">●</b> '
+                 f'{b["flag"]} {b["name"]}</span><span class="strack">{segs}</span></div>')
+    axis = "".join(f'<span style="left:{h/24*100:.2f}%">{h:02d}</span>'
+                   for h in (0, 3, 6, 9, 12, 15, 18, 21, 24))
+    if s["weekend"]:
+        status = f'<span style="color:{MUT}">✖ market closed — weekend</span>'
+    elif s["overlap"]:
+        status = f'<span style="color:{AMBER}">⚡ London–NY overlap · peak liquidity</span>'
+    elif s["any_open"]:
+        live = " + ".join(n for n, o in s["sessions"] if o)
+        status = f'<span style="color:{UP}">● {live} session open</span>'
+    else:
+        status = f'<span style="color:{MUT}">○ between sessions · thin liquidity</span>'
+
+    # ── market activity — ONE line, short phrase only (before the "—") ──
+    ma, phrase, mcol = _market_activity(pairs, atrs)
+    short = phrase.split(" — ")[0]
+    market = (f'<div class="stl-mkt"><span class="lab">Market Activity</span> '
+              f'<span style="color:{mcol};font-weight:700">{short}</span>'
+              f'<span style="color:{MUT}"> · {ma*100:.0f}% of avg range</span></div>')
+
+    # ── news (left): next 3, High preferred, filled with Medium ──
+    events = []
+    if not cal.empty:
+        upc = cal[cal["time"] >= now]
+        events = list(upc[upc["impact"] == "High"].head(3).iterrows())
+        if len(events) < 3:
+            fill = upc[upc["impact"] == "Medium"].head(3 - len(events))
+            events += list(fill.iterrows())
+            events.sort(key=lambda t: t[1]["time"])
+    news_rows = ""
+    for _, ev in events:
+        col = DOWN if ev["impact"] == "High" else AMBER
+        title = _esc(ev["title"])
+        title = (title[:19] + "…") if len(title) > 19 else title
+        news_rows += (f'<div style="display:flex;align-items:baseline;gap:.4rem;margin-top:.26rem;'
+                      f'font:600 12px/1.2 \'JetBrains Mono\',monospace">'
+                      f'<span style="color:{col};flex:0 0 28px;font-weight:800">{_esc(ev["currency"])}</span>'
+                      f'<span style="color:{INK};flex:0 0 50px">{_countdown(ev["time"], now)}</span>'
+                      f'<span style="color:{MUT};overflow:hidden;text-overflow:ellipsis;'
+                      f'white-space:nowrap">{title}</span></div>')
+    if len(events) < 3:
+        msg = ("· nothing else this week — updates next week" if events
+               else "· no high-impact news left — updates next week")
+        news_rows += (f'<div style="margin-top:.26rem;font:italic 600 11px/1.2 '
+                      f'\'JetBrains Mono\',monospace;color:{MUT}">{msg}</div>')
+
+    # ── top movers (right) ──
+    strong, weak = strength.index[0], strength.index[-1]
+    movers = [(p, quotes[p]["change_pct"]) for p in pairs
+              if quotes[p].get("change_pct") is not None]
+    if movers:
+        mp, mc = max(movers, key=lambda x: abs(x[1]))
+        m_pair, m_sub, m_col = mp, f"{mc:+.2f}%", (UP if mc >= 0 else DOWN)
+    else:
+        m_pair, m_sub, m_col = "—", "", MUT
+
+    def mv(lab, val, sub, col):
+        return (f'<div style="margin-top:.2rem;white-space:nowrap">'
+                f'<div class="lab" style="font-size:8px">{lab}</div>'
+                f'<div style="color:{col};font:800 12px/1.15 \'JetBrains Mono\',monospace">'
+                f'{_esc(val)} <span style="font-weight:600;font-size:10px">{_esc(sub)}</span></div></div>')
+    movers_col = (
+        f'<div style="flex:0 0 96px;border-left:1px solid {BORDER};padding-left:.5rem">'
+        + mv("Strongest", strong, f"{strength.iloc[0]:+.2f}", UP)
+        + mv("Top Mover", m_pair, m_sub, m_col)
+        + mv("Weakest", weak, f"{strength.iloc[-1]:+.2f}", DOWN)
+        + '</div>')
+    newsmovers = (f'<div class="stl-nm"><div style="display:flex;gap:.5rem">'
+                  f'<div style="flex:1;min-width:0"><div class="lab">📰 Upcoming News · high · med</div>'
+                  f'{news_rows}</div>{movers_col}</div></div>')
+
+    return (f'<div class="stl">'
+            f'<div class="stl-status">{status}</div>'
+            f'<div class="stl-axis">{axis}</div>'
+            f'<div class="stl-body">{rows}'
+            f'<i class="stl-nowline" style="left:calc(78px + (100% - 78px) * {now_frac:.4f})"></i>'
+            f'</div>{market}{newsmovers}</div>')
+
+
+def kpi_strip(pairs, quotes, atrs, strength, trends, cal, now, include_news=True):
     strong, weak = strength.index[0], strength.index[-1]
     # biggest daily mover among the watched pairs
     movers = [(p, quotes[p]["change_pct"]) for p in pairs
@@ -877,11 +1060,11 @@ def kpi_strip(pairs, quotes, atrs, strength, trends, cal, now):
         f'<div class="sub" style="color:{DOWN}">{strength.iloc[-1]:+.2f}</div></div>'
         f'</div></div>')
 
-    return ('<div class="kpis" style="grid-template-columns:1.4fr 1fr 1.5fr">'
-            + combined
-            + mkt_tile
-            + hi_tile
-            + '</div>')
+    # phone merges Next High-Impact into the session timeline, so it can drop the
+    # news tile here (include_news=False) and show a tighter 2-tile strip.
+    cols = "1.4fr 1fr 1.5fr" if include_news else "1.3fr 1fr"
+    tiles = combined + mkt_tile + (hi_tile if include_news else "")
+    return f'<div class="kpis" style="grid-template-columns:{cols}">{tiles}</div>'
 
 
 # ---------------------------------------------------------------------------
@@ -903,23 +1086,87 @@ def cockpit():
             f'<span class="live"><span class="dot"></span>{rlabel.upper()}</span></div>',
             unsafe_allow_html=True)
     with hMid:
-        ghcol, gcol, wcol = st.columns([1, 1, 3], gap="small")
-        with ghcol:
-            st.markdown(GITHUB_HTML, unsafe_allow_html=True)
-        with gcol:
-            with st.popover("⚙", width="stretch"):
-                settings_panel()
-        with wcol:
-            with st.popover("☰ Watchlist", width="stretch"):
-                watch = watchlist_picker()
+        # keyed container → .st-key-hdrbtns, so CSS can force this row to stay
+        # horizontal on phones (Streamlit otherwise stacks columns when narrow).
+        with st.container(key="hdrbtns"):
+            ghcol, gcol, wcol = st.columns([1, 1, 3], gap="small")
+            with ghcol:
+                st.markdown(GITHUB_HTML, unsafe_allow_html=True)
+            with gcol:
+                with st.popover("⚙", width="stretch"):
+                    settings_panel()
+            with wcol:
+                with st.popover("☰ Watchlist", width="stretch"):
+                    watch = watchlist_picker()
     with hR:
         st.markdown(
             f'<div class="clock" style="text-align:right">'
             f'LAST UPDATED&nbsp; {now:%Y-%m-%d %H:%M:%S} UTC</div>',
             unsafe_allow_html=True)
 
-    # FX session clock — when the action is (independent of the watchlist)
-    st.markdown(sessions_strip(now), unsafe_allow_html=True)
+    # which windows are visible (⚙ Settings → Panels; persisted in the URL)
+    show = {k: st.session_state.get(f"pan_{k}", True) for k in PANEL_KEYS}
+
+    # PHONE layout is selected explicitly by ?view=phone (the desktop app and the
+    # phone both open with it), decoupled from width/UA so the phone-sized desktop
+    # window gets it too. PC (no flag) keeps the completely separate desktop grid.
+    phone_view = st.query_params.get("view") == "phone"
+
+    if phone_view:
+        # full-height layout: the page becomes a fixed-viewport flex column so the
+        # top info bars stay pinned and the two split panes fill + scroll the rest.
+        # (Injected only in phone view → never affects the PC layout.)
+        st.markdown(
+            "<style>"
+            "[data-testid='stMainBlockContainer']{height:100dvh!important;"
+            "overflow:hidden!important;padding:.3rem .5rem .2rem!important;"
+            "display:flex!important;flex-direction:column!important;}"
+            "[data-testid='stMainBlockContainer'] [data-testid='stVerticalBlock']"
+            "{gap:.25rem!important;}"
+            # the layout wrapper that holds the scroll pane grows to fill the
+            # space left by the pinned (locked) top info boxes; margin-top gives a
+            # little breathing room between the locked top and the scroll region
+            "[data-testid='stLayoutWrapper']:has(.st-key-pscroll)"
+            "{flex:1 1 0!important;min-height:0!important;align-self:stretch;margin-top:.55rem!important;}"
+            ".st-key-pscroll{height:100%!important;min-height:0!important;"
+            "border-top:1px solid #1b2230;padding-top:.4rem;}"
+            # remove the LAST UPDATED clock on phone (it crowded the timeline)
+            ".clock{display:none!important;}"
+            # compact header: shorter GitHub / gear / watchlist buttons
+            ".ghlink{height:30px!important;}"
+            "[data-testid='stPopover'] button{padding-top:.2rem!important;"
+            "padding-bottom:.2rem!important;min-height:0!important;}"
+            ".hdr{padding:.1rem!important;}"
+            # push everything up: kill the slack above the header and pull the
+            # two header rows + the locked top closer together (more room below)
+            "[data-testid='stMainBlockContainer']{padding-top:.05rem!important;}"
+            ".st-key-hdrbtns{margin-top:-.2rem!important;}"
+            "[data-testid='stLayoutWrapper']:has(.st-key-pscroll)"
+            "{margin-top:.3rem!important;}"
+            ".st-key-pscroll{padding-top:.3rem!important;}"
+            # Pair Monitor sort/order filter → compact: keep Sort + Order on ONE
+            # row (Streamlit stacks them when narrow), tiny uppercase labels,
+            # shorter dropdown, tighter rows (phone only; PC layout untouched)
+            ".st-key-sortrow [data-testid='stHorizontalBlock']"
+            "{flex-wrap:nowrap!important;gap:.5rem!important;}"
+            ".st-key-sortrow [data-testid='stColumn']"
+            "{min-width:0!important;flex:1 1 auto!important;}"
+            ".st-key-sortrow [data-testid='stVerticalBlock']{gap:.1rem!important;}"
+            ".st-key-sortrow [data-testid='stWidgetLabel']{margin-bottom:.02rem!important;}"
+            ".st-key-sortrow [data-testid='stWidgetLabel'] p"
+            "{font-size:9px!important;letter-spacing:.06em;text-transform:uppercase;}"
+            ".st-key-sortrow [data-baseweb='select']>div"
+            "{min-height:32px!important;padding-top:0!important;padding-bottom:0!important;}"
+            ".st-key-sortrow [role='radiogroup']{gap:.5rem!important;flex-wrap:nowrap!important;}"
+            ".st-key-sortrow [role='radiogroup'] label{white-space:nowrap!important;}"
+            ".st-key-sortrow [role='radiogroup'] p{font-size:10px!important;white-space:nowrap!important;}"
+            "</style>",
+            unsafe_allow_html=True)
+
+    # FX session clock — desktop shows the strip here; phone shows the timeline
+    # (with news merged) in its locked top after data is fetched.
+    if show["sessions"] and not phone_view:
+        st.markdown(sessions_strip(now), unsafe_allow_html=True)
 
     if not watch:
         st.warning("No instruments selected — open **☰ Watchlist** and pick some.")
@@ -930,47 +1177,53 @@ def cockpit():
     trends = {p: data[p]["trend"] for p in watch}
     heats = {p: data[p]["heat"] for p in watch}
     atrs = {p: data[p]["atr"] for p in watch}
-    strength = c_strength(strength_period)
-    cal = c_calendar()
 
-    # KPI strip
-    st.markdown(kpi_strip(watch, quotes, atrs, strength, trends, cal, now), unsafe_allow_html=True)
-
-    # main grid: [monitor+strength] | [heatmap] | [news]
-    left, mid, right = st.columns([5, 4, 3], gap="small")
+    # only fetch what a visible panel needs (KPI uses strength + calendar)
+    strength = c_strength(strength_period) if (show["strength"] or show["kpi"]) else None
+    cal = c_calendar() if (show["calendar"] or show["kpi"]) else None
 
     _STATIC = {"displayModeBar": False, "staticPlot": True, "scrollZoom": False}
 
-    with left:
-        # ── Pair Monitor: title + legend + sort controls + table, ALL one box ──
+    # pair order — read sort from session_state so it still works when the
+    # Pair Monitor (which hosts the sort widgets) is hidden.
+    _sopts = ["Default", "Day %", "Vol"] + tfs
+    if st.session_state.get("sort_by") not in _sopts:
+        st.session_state["sort_by"] = "Default"
+    ordered = order_pairs(
+        watch, quotes, trends, atrs,
+        st.session_state.get("sort_by", "Default"),
+        st.session_state.get("sort_order", "High→Low") == "High→Low")
+
+    if show["kpi"] and not phone_view:   # desktop KPI strip (phone renders its own)
+        st.markdown(kpi_strip(watch, quotes, atrs, strength, trends, cal, now),
+                    unsafe_allow_html=True)
+
+    # ── panel renderers (invoked by the reflow grid / phone carousel below) ──
+    def _panel_monitor():
         with st.container(border=True):
             st.markdown(
                 f'<div class="wtitle">Pair Monitor</div>'
-                f'<div style="color:{MUT};font:500 10px/1.4 monospace;text-align:center;'
-                f'margin-bottom:.4rem">'
-                f'Vol/D = avg daily range (ATR-13): pips · pt gold · $ btc &nbsp;|&nbsp; '
-                f'<span style="color:{UP}">&#9679;</span> = live activity: '
-                f'<span style="color:{UP}">hot</span> · '
-                f'<span style="color:{AMBER}">active</span> · '
-                f'<span style="color:#3a4150">quiet</span> (today\'s range vs avg)</div>',
+                f'<div style="color:{MUT};font:500 10px/1.35 monospace;text-align:center;'
+                f'margin-bottom:.35rem">'
+                f'Vol/D = avg daily range (ATR-13) &nbsp;·&nbsp; '
+                f'<span style="color:{UP}">&#9679;</span> live: '
+                f'<span style="color:{UP}">hot</span> / '
+                f'<span style="color:{AMBER}">active</span> / '
+                f'<span style="color:#3a4150">quiet</span></div>',
                 unsafe_allow_html=True)
-            sc1, sc2 = st.columns([3, 2], gap="small")
-            _sopts = ["Default", "Day %", "Vol"] + tfs
-            if st.session_state.get("sort_by") not in _sopts:
-                st.session_state["sort_by"] = "Default"
-            sort_by = sc1.selectbox("Sort by", _sopts, key="sort_by")
-            sort_desc = sc2.radio("Order", ["High→Low", "Low→High"],
-                                  horizontal=True, key="sort_order") == "High→Low"
-            ordered = order_pairs(watch, quotes, trends, atrs, sort_by, sort_desc)
-            st.markdown(monitor_table(ordered, quotes, trends, atrs),
-                        unsafe_allow_html=True)
-        # ── Top Setups: aligned-trend shortlist (multi-TF trend agreement) ──
+            with st.container(key="sortrow"):
+                sc1, sc2 = st.columns([1, 1], gap="small")
+                sc1.selectbox("Sort by", _sopts, key="sort_by")
+                sc2.radio("Order", ["High→Low", "Low→High"], horizontal=True,
+                          key="sort_order")
+            st.markdown(monitor_table(ordered, quotes, trends, atrs), unsafe_allow_html=True)
+
+    def _panel_setups():
         with st.container(border=True):
             st.markdown('<div class="wtitle">Top Setups · aligned trends</div>' +
                         top_setups_html(watch, trends), unsafe_allow_html=True)
 
-    with mid:
-        # ── Volatility Heatmap: title + hottest-pair note + grid, all one box ──
+    def _panel_heatmap():
         with st.container(border=True):
             hot = max(ordered, key=lambda p: _mean_heat(heats[p])) if ordered else None
             hv = _mean_heat(heats[hot]) if hot else 0.0
@@ -985,21 +1238,22 @@ def cockpit():
                 + vol_heatmap_html(ordered, heats),
                 unsafe_allow_html=True)
 
-    with right:
-        # ── Economic Calendar: one box ──
+    def _panel_calendar():
         with st.container(border=True):
             st.markdown('<div class="wtitle">📰 Economic Calendar</div>' +
                         news_feed(cal, now), unsafe_allow_html=True)
-        # ── Currency Strength: title + chart, one box ──
+
+    def _panel_strength():
         with st.container(border=True):
             st.markdown(f'<div class="wtitle">Currency Strength · {strength_period}</div>',
                         unsafe_allow_html=True)
             st.plotly_chart(strength_fig(strength), width="stretch",
                             config=_STATIC, key="strength_bar")
 
-    # ── Correlation matrix (full width, below the grid) ──
-    corr = c_correlation(tuple(watch))
-    if corr is not None and len(corr.columns) >= 2:
+    def _panel_correlation():
+        corr = c_correlation(tuple(watch))
+        if corr is None or len(corr.columns) < 2:
+            return
         with st.container(border=True):
             n = len(corr.columns)
             more = (f' · showing first {CORR_MAX} of {n} — narrow your watchlist '
@@ -1013,6 +1267,52 @@ def cockpit():
                 f'stacking correlated pairs = the same bet twice (double risk)</div>'
                 + corr_matrix_html(corr),
                 unsafe_allow_html=True)
+
+    if phone_view:
+        # ── PHONE: locked top (compact) + one scrollable page of all windows ──
+        # locked top = session TIMELINE (with Next High-Impact merged in) + a
+        # tighter 2-tile KPI. These stay pinned; the windows scroll beneath.
+        # locked top — ONE merged box: session timeline + one-line Market Activity
+        # + Upcoming News (left) with Top Movers (right).
+        if show["sessions"] or show["kpi"]:
+            st.markdown(phone_top_html(now, watch, atrs, cal, quotes, strength),
+                        unsafe_allow_html=True)
+        with st.container(key="pscroll"):
+            if show["monitor"]:
+                _panel_monitor()
+            if show["setups"]:
+                _panel_setups()
+            if show["heatmap"]:
+                _panel_heatmap()
+            if show["calendar"]:
+                _panel_calendar()
+            if show["strength"]:
+                _panel_strength()
+            if show["correlation"]:
+                _panel_correlation()
+    else:
+        # ── PC: reflow column grid (the desktop layout — untouched) ──
+        cols_spec = []
+        left = [f for k, f in (("monitor", _panel_monitor), ("setups", _panel_setups)) if show[k]]
+        mid = [_panel_heatmap] if show["heatmap"] else []
+        right = [f for k, f in (("calendar", _panel_calendar), ("strength", _panel_strength)) if show[k]]
+        if left:
+            cols_spec.append((5, left))
+        if mid:
+            cols_spec.append((4, mid))
+        if right:
+            cols_spec.append((3, right))
+        if cols_spec:
+            cols = st.columns([w for w, _ in cols_spec], gap="small")
+            for col, (_, panels) in zip(cols, cols_spec):
+                with col:
+                    for render in panels:
+                        render()
+        if show["correlation"]:
+            _panel_correlation()
+
+    if not any(show.values()):
+        st.caption("All panels hidden — turn some back on in ⚙ Settings → Panels.")
 
     # data-source disclaimer (accuracy honesty)
     st.markdown(

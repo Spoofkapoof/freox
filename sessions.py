@@ -100,6 +100,29 @@ def _fx_weekend(now_utc: datetime) -> bool:
     return False
 
 
+FLAGS = {"Sydney": "🇦🇺", "Tokyo": "🇯🇵", "London": "🇬🇧", "New York": "🇺🇸"}
+
+
+def session_bars(now_utc: datetime) -> list:
+    """Each session's active window(s) today on a 0–24 UTC axis, for the timeline.
+    Returns [{name, flag, open, segs:[(start,end)...]}]; a session that wraps
+    midnight (e.g. Sydney) is split into two segments. DST-correct per centre."""
+    if now_utc.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=_UTC)
+    out = []
+    for name, tz, oh, ch in SESSIONS:
+        z = ZoneInfo(tz)
+        day = now_utc.astimezone(z).date()
+        o = datetime.combine(day, dtime(oh), tzinfo=z).astimezone(_UTC)
+        c = datetime.combine(day, dtime(ch), tzinfo=z).astimezone(_UTC)
+        oh_u = o.hour + o.minute / 60.0
+        ch_u = c.hour + c.minute / 60.0
+        segs = [(oh_u, ch_u)] if oh_u <= ch_u else [(oh_u, 24.0), (0.0, ch_u)]
+        out.append({"name": name, "flag": FLAGS.get(name, ""),
+                    "open": _is_open(now_utc, tz, oh, ch), "segs": segs})
+    return out
+
+
 def fmt_countdown(seconds: int) -> str:
     """Seconds → compact 'Hh Mm' (or 'Mm' under an hour)."""
     if seconds < 0:
