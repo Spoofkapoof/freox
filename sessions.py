@@ -103,18 +103,23 @@ def _fx_weekend(now_utc: datetime) -> bool:
 FLAGS = {"Sydney": "🇦🇺", "Tokyo": "🇯🇵", "London": "🇬🇧", "New York": "🇺🇸"}
 
 
-def session_bars(now_utc: datetime) -> list:
-    """Each session's active window(s) today on a 0–24 UTC axis, for the timeline.
+def session_bars(now_utc: datetime, display_tz=None) -> list:
+    """Each session's active window(s) today on a 0–24 axis, for the timeline.
     Returns [{name, flag, open, segs:[(start,end)...]}]; a session that wraps
-    midnight (e.g. Sydney) is split into two segments. DST-correct per centre."""
+    midnight (e.g. Sydney) is split into two segments. DST-correct per centre.
+
+    The axis reads in `display_tz` (a tzinfo) when given — each session's hours
+    are converted into that zone so the whole clock localises together. Defaults
+    to UTC (the historical behaviour)."""
     if now_utc.tzinfo is None:
         now_utc = now_utc.replace(tzinfo=_UTC)
+    axis_tz = display_tz or _UTC
     out = []
     for name, tz, oh, ch in SESSIONS:
         z = ZoneInfo(tz)
         day = now_utc.astimezone(z).date()
-        o = datetime.combine(day, dtime(oh), tzinfo=z).astimezone(_UTC)
-        c = datetime.combine(day, dtime(ch), tzinfo=z).astimezone(_UTC)
+        o = datetime.combine(day, dtime(oh), tzinfo=z).astimezone(axis_tz)
+        c = datetime.combine(day, dtime(ch), tzinfo=z).astimezone(axis_tz)
         oh_u = o.hour + o.minute / 60.0
         ch_u = c.hour + c.minute / 60.0
         segs = [(oh_u, ch_u)] if oh_u <= ch_u else [(oh_u, 24.0), (0.0, ch_u)]

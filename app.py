@@ -9,12 +9,14 @@ Single-screen command center (no tabs), trading-terminal styling:
   • News feed      — this week's economic calendar w/ live countdown
 
 Data: Yahoo Finance (prices) + Forex Factory (calendar). No API keys.
-Run:  bash launch.sh   (or: streamlit run app.py)
+Run:  bash phone.sh   (or: streamlit run app.py)
 """
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 from urllib.parse import quote_plus
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -97,7 +99,7 @@ AMBER   = "#ffb020"
 INK     = "#d7dde8"
 MUT     = "#6b7688"
 
-VERSION = "0.4"   # beta — bump on each release
+VERSION = "0.5"   # beta — bump on each release
 GITHUB_URL = "https://github.com/Spoofkapoof/freox"
 GITHUB_HTML = (
     f'<a class="ghlink" href="{GITHUB_URL}" target="_blank" rel="noopener"'
@@ -112,6 +114,36 @@ GITHUB_HTML = (
     '-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 '
     '8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg></a>'
 )
+
+# ── display time zone (⚙ setting) ──────────────────────────────────────────
+# Purely a DISPLAY conversion: the session clock/now-line + calendar times are
+# shown in the chosen zone. All the underlying logic (which session is open,
+# countdowns) stays UTC-correct. "Local" = the machine running the server.
+TZ_OPTIONS = {
+    "Local":    None,                 # this device's own zone
+    "UTC":      "UTC",
+    "New York": "America/New_York",   # US session / FX-day rollover
+    "London":   "Europe/London",      # biggest FX session (GMT/BST)
+    "Beijing":  "Asia/Shanghai",      # China Standard Time (UTC+8)
+}
+
+
+def _resolve_tz(name):
+    """tzinfo for a TZ_OPTIONS label ('Local' → the machine's own zone)."""
+    iana = TZ_OPTIONS.get(name)
+    if iana is None:
+        return datetime.now().astimezone().tzinfo
+    return ZoneInfo(iana)
+
+
+def _tz_label(name, tz):
+    """Short label like 'New York (UTC-4)' for the data footer."""
+    off = datetime.now(tz).utcoffset() or timedelta(0)
+    mins = int(off.total_seconds() // 60)
+    sign = "+" if mins >= 0 else "-"
+    hh, mm = divmod(abs(mins), 60)
+    tag = f"UTC{sign}{hh}" + (f":{mm:02d}" if mm else "")
+    return f"{name} · {tag}"
 
 st.set_page_config(page_title="FREOX ▮ FX Cockpit", page_icon="💹",
                    layout="wide", initial_sidebar_state="collapsed")
@@ -149,7 +181,7 @@ st.markdown(f"""<style>
 
   /* header */
   .hdr{{display:flex;align-items:center;gap:.7rem;padding:.15rem .1rem;}}
-  .logo{{font:800 20px/1 'JetBrains Mono',monospace;color:{INK};letter-spacing:.28em;}}
+  .logo{{font:800 20px/1.3 'JetBrains Mono',monospace;color:{INK};letter-spacing:.28em;}}
   .logo b{{color:{UP};}}
   .live{{display:inline-flex;align-items:center;gap:.4rem;color:{UP};
          font:700 11px/1 'JetBrains Mono',monospace;letter-spacing:.14em;}}
@@ -244,7 +276,7 @@ st.markdown(f"""<style>
   .ghlink svg{{width:18px;height:18px;display:block;}}
   /* keep the header GitHub / ⚙ / Watchlist row in ONE line — don't let it
      stack vertically on narrow (phone) screens like Streamlit columns do. */
-  .st-key-hdrbtns [data-testid="stHorizontalBlock"]{{flex-wrap:nowrap!important;gap:.4rem!important;}}
+  .st-key-hdrbtns [data-testid="stHorizontalBlock"]{{flex-wrap:nowrap!important;gap:.5rem!important;}}
   .st-key-hdrbtns [data-testid="stColumn"]{{min-width:0!important;flex:1 1 auto!important;}}
 
   /* ── phone single scroll pane (?view=phone): the windows scroll under the
@@ -298,19 +330,18 @@ st.markdown(f"""<style>
   div[data-testid="stSpinner"]{{display:none!important;}}
   .stApp [data-testid="stAppViewBlockContainer"]{{opacity:1!important;}}
 
-  /* ── mobile / narrow screens (phone "app" via Add-to-Home-Screen) ── */
-  @media (max-width: 640px){{
-    .block-container{{padding:.4rem .5rem 0!important;}}
-    .kpis{{grid-template-columns:1fr!important;gap:.4rem;}}   /* stack KPI tiles */
-    .kpi .val{{font-size:18px;}}
-    .logo{{font-size:16px;letter-spacing:.16em;}}
-    .clock{{font-size:11px;}}
-    .sessbar{{font-size:10px;}}
-    /* wide tables scroll sideways inside their box instead of squishing */
-    .scrollx{{overflow-x:auto;-webkit-overflow-scrolling:touch;}}
-    table.term{{font-size:12px;}} table.term th,table.term td{{padding:.4rem .35rem;}}
-    table.corr{{min-width:520px;}}       /* force horizontal scroll on phone */
-  }}
+  /* ── phone-cockpit sizing — the ONE layout, applied on every screen so the
+     PC (centred phone-width column) looks exactly like the phone ── */
+  .block-container{{padding:.4rem .5rem 0!important;}}
+  .kpis{{grid-template-columns:1fr!important;gap:.4rem;}}   /* stack KPI tiles */
+  .kpi .val{{font-size:18px;}}
+  .logo{{font-size:16px;letter-spacing:.16em;}}
+  .clock{{font-size:11px;}}
+  .sessbar{{font-size:10px;}}
+  /* wide tables scroll sideways inside their box instead of squishing */
+  .scrollx{{overflow-x:auto;-webkit-overflow-scrolling:touch;}}
+  table.term{{font-size:12px;}} table.term th,table.term td{{padding:.4rem .35rem;}}
+  table.corr{{min-width:520px;}}       /* force horizontal scroll */
 </style>""", unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
@@ -411,6 +442,7 @@ if not st.session_state.get("_settings_restored"):
     st.session_state["news_impacts"] = _csv("ni", NEWS_LEVELS, ["High", "Medium"])
     _sp = _qp.get("sp"); st.session_state["strength_period"] = _sp if _sp in ("24H", "1D", "1W") else "24H"
     _rf = _qp.get("rf"); st.session_state["refresh_lbl"] = _rf if _rf in ("Off", "5s", "15s", "30s", "60s") else "5s"
+    _tz = _qp.get("tz"); st.session_state["tz_sel"] = _tz if _tz in TZ_OPTIONS else "Local"
     _so = _qp.get("so"); st.session_state["sort_order"] = _so if _so in ("High→Low", "Low→High") else "High→Low"
     st.session_state["sort_by"] = _qp.get("sb") or "Default"
     _wl = _qp.get("wl")
@@ -432,6 +464,7 @@ def persist_settings():
         "ni": ",".join(st.session_state.get("news_impacts", [])),
         "sp": st.session_state.get("strength_period", "24H"),
         "rf": st.session_state.get("refresh_lbl", "5s"),
+        "tz": st.session_state.get("tz_sel", "Local"),
         "sb": st.session_state.get("sort_by", "Default"),
         "so": st.session_state.get("sort_order", "High→Low"),
         "wl": ",".join(p for p in ALL_SYMBOLS if st.session_state.get(f"w_{p}")),
@@ -451,11 +484,14 @@ _REFRESH_MAP = {"Off": None, "5s": 5, "15s": 15, "30s": 30, "60s": 60}
 
 def _read_settings():
     """Refresh the module-level setting globals from session_state."""
-    global tfs, strength_period, news_impacts, refresh_lbl
+    global tfs, strength_period, news_impacts, refresh_lbl, display_tz, tz_label
     tfs = [t for t in TF_ALL if t in st.session_state.get("tfs_sel", TF_ALL)] or TF_ALL
     strength_period = st.session_state.get("strength_period", "24H")
     news_impacts = st.session_state.get("news_impacts", ["High", "Medium"])
     refresh_lbl = st.session_state.get("refresh_lbl", "5s")
+    _tzname = st.session_state.get("tz_sel", "Local")
+    display_tz = _resolve_tz(_tzname)
+    tz_label = _tz_label(_tzname, display_tz)
 
 
 _read_settings()
@@ -473,6 +509,9 @@ def settings_panel():
                  help="Lookback for the currency-strength bar.")
     st.selectbox("Auto-refresh", ["Off", "5s", "15s", "30s", "60s"], key="refresh_lbl",
                  help="How often the dashboard pulls fresh prices.")
+    st.selectbox("Time zone", list(TZ_OPTIONS), key="tz_sel",
+                 help="Show the session clock, now-line and calendar times in this "
+                      "zone. 'Local' = your device's timezone.")
     st.multiselect("News impact", NEWS_LEVELS, key="news_impacts",
                    help="Impact levels to show in the Economic Calendar.")
 
@@ -659,7 +698,7 @@ def top_setups_html(pairs, trends):
     return (f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:.7rem;margin-top:.2rem">'
             f'<div>{col(longs, UP, "LONGS ▲")}</div>'
             f'<div>{col(shorts, DOWN, "SHORTS ▼")}</div></div>'
-            f'<div class="sub" style="color:{MUT};text-align:center;margin-top:.3rem">'
+            f'<div class="sub phelp" style="color:{MUT};text-align:center;margin-top:.3rem">'
             f'★ = all timeframes aligned · arrows = M15·H1·H4·D1</div>')
 
 
@@ -701,7 +740,7 @@ def news_feed(cal, now):
                 quote_plus(f'{ev["currency"]} {ev["title"]}'))
         rows += (
             f'<a class="nrow{nxt}" href="{link}" target="_blank" rel="noopener">'
-            f'<span class="t">{ev["time"]:%a %H:%M}</span>'
+            f'<span class="t">{ev["time"].astimezone(display_tz):%a %H:%M}</span>'
             f'<span class="badge">{_esc(ev["currency"])}</span>'
             f'<span class="ev"><span style="color:{dot}">&#9679;</span> '
             f'{_esc(ev["title"])} ↗</span>'
@@ -889,9 +928,10 @@ def _market_activity(pairs, atrs):
 def phone_top_html(now, pairs, atrs, cal, quotes, strength):
     """The ENTIRE locked top as ONE compact box: session timeline + a one-line
     Market Activity + Upcoming News (left) with Top Movers (right)."""
-    # ── session timeline ──
-    bars = sess.session_bars(now)
-    now_frac = (now.hour + now.minute / 60) / 24
+    # ── session timeline (axis + bars + now-line all in the chosen display tz) ──
+    bars = sess.session_bars(now, display_tz)
+    now_l = now.astimezone(display_tz)
+    now_frac = (now_l.hour + now_l.minute / 60) / 24
     s = sess.market_sessions(now)
     rows = ""
     for b in bars:
@@ -1077,40 +1117,37 @@ def cockpit():
     now = d.now_utc()
     rlabel = "auto-refresh off" if _REFRESH is None else f"every {refresh_lbl}"
 
-    # top bar: logo/live | GitHub + ⚙ settings + Watchlist | LAST UPDATED time
-    hL, hMid, hR = st.columns([5, 4, 5], gap="small", vertical_alignment="center")
-    with hL:
-        st.markdown(
-            f'<div class="hdr"><span class="logo">FRE<b>O</b>X</span>'
-            f'<span class="beta">v{VERSION} BETA</span>'
-            f'<span class="live"><span class="dot"></span>{rlabel.upper()}</span></div>',
-            unsafe_allow_html=True)
-    with hMid:
-        # keyed container → .st-key-hdrbtns, so CSS can force this row to stay
-        # horizontal on phones (Streamlit otherwise stacks columns when narrow).
-        with st.container(key="hdrbtns"):
-            ghcol, gcol, wcol = st.columns([1, 1, 3], gap="small")
-            with ghcol:
-                st.markdown(GITHUB_HTML, unsafe_allow_html=True)
-            with gcol:
-                with st.popover("⚙", width="stretch"):
-                    settings_panel()
-            with wcol:
-                with st.popover("☰ Watchlist", width="stretch"):
-                    watch = watchlist_picker()
-    with hR:
-        st.markdown(
-            f'<div class="clock" style="text-align:right">'
-            f'LAST UPDATED&nbsp; {now:%Y-%m-%d %H:%M:%S} UTC</div>',
-            unsafe_allow_html=True)
+    # header (single-column cockpit): logo/live row, then the buttons row.
+    # Rendered as two stacked rows rather than responsive [5,4,5] columns so it
+    # looks identical at any width (Streamlit only stacks columns on a narrow
+    # viewport, which would cram the buttons on a wide screen).
+    st.markdown(
+        f'<div class="hdr"><span class="logo">FRE<b>O</b>X</span>'
+        f'<span class="beta">v{VERSION} BETA</span>'
+        f'<span class="live"><span class="dot"></span>{rlabel.upper()}</span></div>',
+        unsafe_allow_html=True)
+    # keyed container → .st-key-hdrbtns, so CSS can force this row to stay
+    # horizontal (Streamlit otherwise stacks columns when the viewport is narrow).
+    with st.container(key="hdrbtns"):
+        ghcol, gcol, wcol = st.columns([1, 1, 3], gap="small")
+        with ghcol:
+            st.markdown(GITHUB_HTML, unsafe_allow_html=True)
+        with gcol:
+            with st.popover("⚙", width="stretch"):
+                settings_panel()
+        with wcol:
+            with st.popover("☰ Watchlist", width="stretch"):
+                watch = watchlist_picker()
 
     # which windows are visible (⚙ Settings → Panels; persisted in the URL)
     show = {k: st.session_state.get(f"pan_{k}", True) for k in PANEL_KEYS}
 
-    # PHONE layout is selected explicitly by ?view=phone (the desktop app and the
-    # phone both open with it), decoupled from width/UA so the phone-sized desktop
-    # window gets it too. PC (no flag) keeps the completely separate desktop grid.
-    phone_view = st.query_params.get("view") == "phone"
+    # The phone cockpit is the ONE layout now, everywhere. The old wide multi-column
+    # grid was retired in favour of the (cleaner) single-column phone cockpit; on a
+    # big screen it's centred at phone width (dark margins on the sides) so the PC
+    # looks exactly like the phone. ?view=phone is still accepted (the desktop-app
+    # window passes it) but no longer changes anything.
+    phone_view = True
 
     if phone_view:
         # full-height layout: the page becomes a fixed-viewport flex column so the
@@ -1121,6 +1158,10 @@ def cockpit():
             "[data-testid='stMainBlockContainer']{height:100dvh!important;"
             "overflow:hidden!important;padding:.3rem .5rem .2rem!important;"
             "display:flex!important;flex-direction:column!important;}"
+            # centre the cockpit at phone width on big screens → PC == phone,
+            # with the dark page background showing on either side
+            "[data-testid='stMainBlockContainer']{max-width:480px!important;"
+            "margin-left:auto!important;margin-right:auto!important;}"
             "[data-testid='stMainBlockContainer'] [data-testid='stVerticalBlock']"
             "{gap:.25rem!important;}"
             # the layout wrapper that holds the scroll pane grows to fill the
@@ -1133,17 +1174,30 @@ def cockpit():
             # remove the LAST UPDATED clock on phone (it crowded the timeline)
             ".clock{display:none!important;}"
             # compact header: shorter GitHub / gear / watchlist buttons
-            ".ghlink{height:30px!important;}"
-            "[data-testid='stPopover'] button{padding-top:.2rem!important;"
-            "padding-bottom:.2rem!important;min-height:0!important;}"
+            # GitHub / ⚙ / Watchlist buttons all the SAME height so the row is
+            # symmetrical (was 30px vs 26px), a touch taller, not cramped
+            ".ghlink{height:34px!important;}"
+            "[data-testid='stPopover'] button{padding-top:.25rem!important;"
+            "padding-bottom:.25rem!important;min-height:34px!important;"
+            "display:flex!important;align-items:center!important;justify-content:center!important;}"
             ".hdr{padding:.1rem!important;}"
-            # push everything up: kill the slack above the header and pull the
-            # two header rows + the locked top closer together (more room below)
-            "[data-testid='stMainBlockContainer']{padding-top:.05rem!important;}"
-            ".st-key-hdrbtns{margin-top:-.2rem!important;}"
+            # tighten every panel's help-text on phone so the verbose ones
+            # (heatmap, correlation) collapse to fewer lines and the Pair Monitor
+            # blurb fits one line — desktop keeps its full-size help text
+            ".phelp{font-size:9px!important;line-height:1.32!important;"
+            "margin-bottom:.3rem!important;}"
+            # tight top, but leave the logo room to breathe and a clear gap
+            # between the logo row and the buttons row (they were overlapping)
+            "[data-testid='stMainBlockContainer']{padding-top:.4rem!important;}"
+            ".hdr{margin-bottom:.5rem!important;}"
+            ".st-key-hdrbtns{margin-top:.5rem!important;}"
+            # space between the info-bar (locked top) and the divider line above
+            # the scroll area, so the separator isn't pressed against the box
             "[data-testid='stLayoutWrapper']:has(.st-key-pscroll)"
-            "{margin-top:.3rem!important;}"
-            ".st-key-pscroll{padding-top:.3rem!important;}"
+            "{margin-top:.75rem!important;}"
+            # a bit more breathing room below the divider so the first panel
+            # (Pair Monitor) isn't pressed right up against the separator line
+            ".st-key-pscroll{padding-top:.7rem!important;}"
             # Pair Monitor sort/order filter → compact: keep Sort + Order on ONE
             # row (Streamlit stacks them when narrow), tiny uppercase labels,
             # shorter dropdown, tighter rows (phone only; PC layout untouched)
@@ -1203,10 +1257,10 @@ def cockpit():
         with st.container(border=True):
             st.markdown(
                 f'<div class="wtitle">Pair Monitor</div>'
-                f'<div style="color:{MUT};font:500 10px/1.35 monospace;text-align:center;'
-                f'margin-bottom:.35rem">'
+                f'<div class="phelp" style="color:{MUT};font:500 10px/1.35 monospace;'
+                f'text-align:center;margin-bottom:.35rem">'
                 f'Vol/D = avg daily range (ATR-13) &nbsp;·&nbsp; '
-                f'<span style="color:{UP}">&#9679;</span> live: '
+                f'<span style="color:{UP}">&#9679;</span> '
                 f'<span style="color:{UP}">hot</span> / '
                 f'<span style="color:{AMBER}">active</span> / '
                 f'<span style="color:#3a4150">quiet</span></div>',
@@ -1230,7 +1284,7 @@ def cockpit():
             hcol = UP if hv >= 1.0 else (AMBER if hv >= 0.618 else MUT)
             st.markdown(
                 f'<div class="wtitle">Volatility Heatmap · pair × TF</div>'
-                f'<div style="color:{INK};font:600 12px/1.5 monospace;text-align:center">'
+                f'<div class="phelp" style="color:{INK};font:600 12px/1.5 monospace;text-align:center">'
                 f'▸ Hottest now: <span style="color:{hcol}">{hot} {hv:.1f}×</span> '
                 f'<span style="color:{MUT}">vs its normal range</span><br>'
                 f'<span style="color:{MUT}">bright = running hot right now · '
@@ -1260,8 +1314,8 @@ def cockpit():
                     f'for the rest') if n > CORR_MAX else ''
             st.markdown(
                 f'<div class="wtitle">Correlation · {CORR_WINDOW}-day returns{more}</div>'
-                f'<div style="color:{MUT};font:500 10px/1.4 monospace;text-align:center;'
-                f'margin-bottom:.35rem">'
+                f'<div class="phelp" style="color:{MUT};font:500 10px/1.4 monospace;'
+                f'text-align:center;margin-bottom:.35rem">'
                 f'<span style="color:#e8873a">amber = move together</span> · '
                 f'<span style="color:#3d7dd6">blue = move opposite</span> · '
                 f'stacking correlated pairs = the same bet twice (double risk)</div>'
@@ -1321,7 +1375,7 @@ def cockpit():
         f'DATA · Prices: Yahoo Finance indicative mid quotes — near-real-time, '
         f'may differ from your broker, not for execution. '
         f'Calendar: Forex Factory. Strength/trend/vol computed locally. '
-        f'All times UTC.</div>', unsafe_allow_html=True)
+        f'All times {tz_label}.</div>', unsafe_allow_html=True)
 
     # persist all current settings to the URL so a page refresh restores them
     persist_settings()

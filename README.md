@@ -92,11 +92,13 @@ No accounts or API keys are needed.
 ## Run
 
 ```bash
-bash launch.sh
+bash phone.sh
 ```
 
 On first run this creates a local virtualenv and installs dependencies, then starts
-the dashboard. Open <http://127.0.0.1:8502> when it says it's ready.
+the dashboard on your local network — one server for both your computer and your
+phone. Open <http://127.0.0.1:8502> on this machine, or scan the QR code it prints
+to open the phone layout on your phone (same Wi-Fi).
 
 To run it manually instead:
 
@@ -113,7 +115,8 @@ app.py          Streamlit cockpit (UI + layout)
 data_feed.py    Price + economic-calendar fetching, disk cache
 indicators.py   Trend (Fib 3-EMA), ATR volatility, heat, currency-strength math
 sessions.py     FX market-session clock (pure time logic)
-launch.sh       One-command launcher
+phone.sh        One-command launcher (PC + phone, prints a QR code)
+desktop_app.sh  Optional phone-shaped desktop app window
 requirements.txt
 ```
 
