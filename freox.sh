@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Freox — one command to run the dashboard on your computer AND your phone.
 #
-#   ./phone.sh
+#   ./freox.sh
 #
 # Serves Freox on your local network (one server → PC + phone, same live data)
 # and prints a QR code you scan with your phone. Press Ctrl+C to stop.

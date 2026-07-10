@@ -21,7 +21,7 @@ right now, which pairs are moving, and how do they relate to each other.** No ta
 accounts, **no API keys** — just launch it and read the market. Built with Python +
 Streamlit; covers all 28 major/minor FX pairs plus **gold (XAUUSD)** and **Bitcoin (BTC)**.
 
-![Freox dashboard](assets/freox-screenshot.png)
+![Freox dashboard](assets/freoxmainbackground.png)
 
 ### What you can do with it
 
@@ -92,7 +92,7 @@ No accounts or API keys are needed.
 ## Run
 
 ```bash
-bash phone.sh
+bash freox.sh
 ```
 
 On first run this creates a local virtualenv and installs dependencies, then starts
@@ -115,7 +115,7 @@ app.py          Streamlit cockpit (UI + layout)
 data_feed.py    Price + economic-calendar fetching, disk cache
 indicators.py   Trend (Fib 3-EMA), ATR volatility, heat, currency-strength math
 sessions.py     FX market-session clock (pure time logic)
-phone.sh        One-command launcher (PC + phone, prints a QR code)
+freox.sh        One-command launcher (PC + phone, prints a QR code)
 desktop_app.sh  Optional phone-shaped desktop app window
 requirements.txt
 ```

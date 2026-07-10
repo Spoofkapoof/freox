@@ -9,7 +9,7 @@ Single-screen command center (no tabs), trading-terminal styling:
   • News feed      — this week's economic calendar w/ live countdown
 
 Data: Yahoo Finance (prices) + Forex Factory (calendar). No API keys.
-Run:  bash phone.sh   (or: streamlit run app.py)
+Run:  bash freox.sh   (or: streamlit run app.py)
 """
 from __future__ import annotations
 
