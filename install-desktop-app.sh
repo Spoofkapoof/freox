@@ -10,7 +10,7 @@ APPS="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 DESKTOP="$APPS/Freox.desktop"
 
 mkdir -p "$APPS"
-chmod +x "$HERE/desktop_app.sh"
+chmod +x "$HERE/freox.sh"
 
 cat > "$DESKTOP" <<EOF
 [Desktop Entry]
@@ -18,7 +18,7 @@ Type=Application
 Name=Freox
 GenericName=Forex Cockpit
 Comment=Live forex cockpit — strength, volatility, correlation, sessions
-Exec=$HERE/desktop_app.sh
+Exec=$HERE/freox.sh
 Icon=$HERE/assets/freox-icon.svg
 Terminal=false
 Categories=Office;Finance;
@@ -30,5 +30,5 @@ chmod +x "$DESKTOP"
 update-desktop-database "$APPS" 2>/dev/null || true
 
 echo "Installed: $DESKTOP"
-echo "Search 'Freox' in your app menu, or run: $HERE/desktop_app.sh"
+echo "Search 'Freox' in your app menu, or run: $HERE/freox.sh"
 echo "To uninstall: rm \"$DESKTOP\""

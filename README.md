@@ -95,10 +95,14 @@ No accounts or API keys are needed.
 bash freox.sh
 ```
 
-On first run this creates a local virtualenv and installs dependencies, then starts
-the dashboard on your local network — one server for both your computer and your
-phone. Open <http://127.0.0.1:8502> on this machine, or scan the QR code it prints
-to open the phone layout on your phone (same Wi-Fi).
+On first run this creates a local virtualenv and installs dependencies. Then it
+**opens the cockpit as a desktop app window** *and* serves it on your local
+network for your phone — one server, identical live data. Scan the QR code it
+prints to open it on your phone (same Wi-Fi), or visit <http://127.0.0.1:8502>.
+
+```bash
+bash freox.sh --no-window    # serve only (phone / headless) — no desktop window
+```
 
 To run it manually instead:
 
@@ -115,8 +119,8 @@ app.py          Streamlit cockpit (UI + layout)
 data_feed.py    Price + economic-calendar fetching, disk cache
 indicators.py   Trend (Fib 3-EMA), ATR volatility, heat, currency-strength math
 sessions.py     FX market-session clock (pure time logic)
-freox.sh        One-command launcher (PC + phone, prints a QR code)
-desktop_app.sh  Optional phone-shaped desktop app window
+freox.sh        One-command launcher — desktop cockpit window + phone (QR code)
+desktop_app.sh  Thin wrapper around freox.sh (for the installed app-menu entry)
 requirements.txt
 ```
 
